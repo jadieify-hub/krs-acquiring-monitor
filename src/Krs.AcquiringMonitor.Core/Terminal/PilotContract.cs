@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Krs.AcquiringMonitor.Core.Terminal
 {
@@ -102,7 +103,14 @@ namespace Krs.AcquiringMonitor.Core.Terminal
                 length = bytes.Length;
             }
 
-            return Encoding.GetEncoding(866).GetString(bytes, 0, length);
+            string windowsText = Encoding.GetEncoding(1251).GetString(bytes, 0, length);
+            // Выбираем по русским меткам отчёта, а не по псевдографике разделителей.
+            return Regex.IsMatch(
+                windowsText,
+                @"\b(?:ПАО|ООО|АО|ИП|СБЕРБАНК|ОТДЕЛ|ИТОГО)\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                ? windowsText
+                : Encoding.GetEncoding(866).GetString(bytes, 0, length);
         }
     }
 }

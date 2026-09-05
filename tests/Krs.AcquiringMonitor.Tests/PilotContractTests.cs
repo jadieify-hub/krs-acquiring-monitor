@@ -53,6 +53,16 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.Equal("ООО Колокольчик\r\nИТОГО 1 250,00", decoded);
         }
 
+        public static void DecodesWindows1251Receipt()
+        {
+            byte[] encoded = Encoding.GetEncoding(1251).GetBytes(
+                "ПАО СБЕРБАНК\r\nОтдел: ИП ПРИМЕРОВ\r\nИТОГО 125,50\0не часть отчёта");
+
+            TestAssert.Equal(
+                "ПАО СБЕРБАНК\r\nОтдел: ИП ПРИМЕРОВ\r\nИТОГО 125,50",
+                TerminalReceiptDecoder.Decode(encoded));
+        }
+
         private static byte[] MinimalPeImage(ushort machine)
         {
             var bytes = new byte[512];

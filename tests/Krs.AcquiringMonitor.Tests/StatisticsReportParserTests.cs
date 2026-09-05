@@ -1,11 +1,90 @@
 using System.Collections.Generic;
+using System.Text;
 using Krs.AcquiringMonitor.Core.Monitoring;
 using Krs.AcquiringMonitor.Core.Reports;
+using Krs.AcquiringMonitor.Core.Terminal;
 
 namespace Krs.AcquiringMonitor.Tests
 {
     internal static class StatisticsReportParserTests
     {
+        // Обезличенная структура контрольной ленты UPOS; реальные реквизиты не сохраняются.
+        private const string ControlTapeReport =
+            "ПАО СБЕРБАНК   Контрольная лента\n" +
+            "Отдел    :       ИП ИВАНОВ И И\n" +
+            " Оплата\n" +
+            "   Сумма:             1250.50\n" +
+            " Всего операций:           1\n" +
+            "   На сумму:          1250.50\n" +
+            " ---------------------------\n" +
+            " Количество оплат:         1\n" +
+            "  На сумму:           1250.50\n\n" +
+            " Количество отмен:         0\n" +
+            "  На сумму:              0.00\n\n" +
+            " Количество возвратов:     1\n" +
+            "  На сумму:            100.25\n\n" +
+            "Отдел    :    ООО \"\"КОЛОКОЛЬЧИК\"\"\n" +
+            " Оплата\n" +
+            "   Сумма:               89.00\n" +
+            " Всего операций:           1\n" +
+            "   На сумму:            89.00\n" +
+            " ---------------------------\n" +
+            " Количество оплат:         1\n" +
+            "  На сумму:             89.00\n\n" +
+            " Количество отмен:         0\n" +
+            "  На сумму:              0.00\n\n" +
+            " Количество возвратов:     0\n" +
+            "  На сумму:              0.00\n" +
+            "******* Отчёт закончен *******\n" +
+            "       Оплата-картой.рф\n~S\u0001";
+
+        public static void ParsesControlTapeReceipt()
+        {
+            foreach (int codePage in new[] { 1251, 866 })
+            {
+                byte[] bytes = Encoding.GetEncoding(codePage).GetBytes(ControlTapeReport);
+                IReadOnlyList<OrganizationReport> parsed =
+                    StatisticsReportParser.Parse(TerminalReceiptDecoder.Decode(bytes));
+
+                TestAssert.Equal(2, parsed.Count);
+                TestAssert.Equal("ИП ИВАНОВ", parsed[0].ShortName);
+                TestAssert.Equal(115025L, parsed[0].TotalKopeks);
+                TestAssert.Equal("ООО КОЛОКОЛЬЧИК", parsed[1].ShortName);
+                TestAssert.Equal(8900L, parsed[1].TotalKopeks);
+            }
+        }
+
+        public static void RejectsIncompleteOrDuplicateControlTapeSummary()
+        {
+            string[] invalidReports =
+            {
+                ControlTapeReport.Replace(
+                    " Количество возвратов:     0\n  На сумму:              0.00\n", ""),
+                ControlTapeReport.Replace(
+                    " Количество возвратов:     0\n  На сумму:              0.00\n",
+                    " Количество возвратов:     0\n"),
+                ControlTapeReport + "\n Количество оплат: 1\n На сумму: 89.00\n",
+                ControlTapeReport.Replace(
+                    "  На сумму:             89.00",
+                    "  На сумму: значение не определено 89.00"),
+                ControlTapeReport.Replace(
+                    " Количество возвратов:     0", " Количество возвратов: нет данных")
+            };
+            foreach (string report in invalidReports)
+            {
+                TestAssert.Equal(0, StatisticsReportParser.Parse(report).Count);
+            }
+        }
+
+        public static void RejectsControlTapeWithUnverifiedCancellations()
+        {
+            string report = ControlTapeReport.Replace(
+                " Количество отмен:         0\n  На сумму:              0.00",
+                " Количество отмен:         1\n  На сумму:             10.00");
+
+            TestAssert.Equal(0, StatisticsReportParser.Parse(report).Count);
+        }
+
         public static void ShortensEntrepreneurName()
         {
             TestAssert.Equal(
@@ -25,6 +104,7 @@ namespace Krs.AcquiringMonitor.Tests
             string report =
                 "СБЕРБАНК\r\n" +
                 "ООО «Колокольчик»\r\n" +
+                "Количество операций: 5\r\n" +
                 "ОПЛАТА                 12 345,67\r\n" +
                 "ВОЗВРАТ                 1 100,50\r\n" +
                 "ИТОГО                   11 245,17\r\n";

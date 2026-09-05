@@ -36,6 +36,9 @@ namespace Krs.AcquiringMonitor.Tests
             Run("сокращается имя ООО", StatisticsReportParserTests.ShortensCompanyName);
             Run("разбирается итог одной организации", StatisticsReportParserTests.ParsesSingleOrganizationTotal);
             Run("разбираются две организации", StatisticsReportParserTests.ParsesTwoOrganizations);
+            Run("контрольная лента UPOS декодируется и разбирается", StatisticsReportParserTests.ParsesControlTapeReceipt);
+            Run("неполные и повторные итоги ленты отклоняются", StatisticsReportParserTests.RejectsIncompleteOrDuplicateControlTapeSummary);
+            Run("непроверенные отмены ленты не меняют суммы", StatisticsReportParserTests.RejectsControlTapeWithUnverifiedCancellations);
             Run("итог вычисляется из оплаты и возврата", StatisticsReportParserTests.CalculatesTotalWhenExplicitTotalIsMissing);
             Run("неоднозначный итог отклоняется", StatisticsReportParserTests.RejectsConflictingTotals);
             Run("ошибка одной секции отклоняет весь отчёт", StatisticsReportParserTests.RejectsWholeReportWhenASectionIsInvalid);
@@ -68,6 +71,7 @@ namespace Krs.AcquiringMonitor.Tests
             Run("распознаётся x86 PE-файл", PilotContractTests.ReadsX86PeMachine);
             Run("повреждённый PE-файл отклоняется", PilotContractTests.RejectsMalformedPeFile);
             Run("чек CP866 декодируется в Unicode", PilotContractTests.DecodesCp866Receipt);
+            Run("чек Windows-1251 декодируется в Unicode", PilotContractTests.DecodesWindows1251Receipt);
             Run("путь helper-а не искажается", TerminalStatisticsClientTests.QuotesWindowsPathWithoutChangingSeparators);
             Run("остатки временных отчётов удаляются", TerminalStatisticsClientTests.RemovesStaleTemporaryReports);
             Run("автоимена запрашиваются не чаще десяти минут", AutomaticNameRefreshPolicyTests.WaitsUntilDueAndRetriesAfterTenMinutes);

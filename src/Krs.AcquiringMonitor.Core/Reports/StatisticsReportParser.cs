@@ -12,6 +12,14 @@ namespace Krs.AcquiringMonitor.Core.Reports
             @"(?<!\d)(?<value>-?(?:\d{1,3}(?:[ \u00A0]\d{3})+|\d+)[,.]\d{2})(?!\d)",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+        private static readonly Regex SummaryHeaderPattern = new Regex(
+            @"^\s*Количество\s+(?<kind>оплат|отмен|возвратов)\s*:\s*(?<count>\d+)\s*$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        private static readonly Regex SummaryAmountPattern = new Regex(
+            @"^\s*На сумму:\s*" + MoneyPattern.ToString() + @"\s*$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
         public static IReadOnlyList<OrganizationReport> Parse(string reportText)
         {
             if (string.IsNullOrWhiteSpace(reportText))
@@ -104,6 +112,11 @@ namespace Krs.AcquiringMonitor.Core.Reports
                 return false;
             }
 
+            if (allLines.Any(line => SummaryHeaderPattern.IsMatch(line)))
+            {
+                return TryGetControlTapeTotal(allLines, out total);
+            }
+
             List<string> purchaseLines = allLines
                 .Where(line => Contains(line, "ОПЛАТ") || Contains(line, "ПОКУП"))
                 .ToList();
@@ -132,6 +145,60 @@ namespace Krs.AcquiringMonitor.Core.Reports
             }
 
             total = checked(Math.Abs(purchase) - refund);
+            return true;
+        }
+
+        private static bool TryGetControlTapeTotal(IReadOnlyList<string> lines, out long total)
+        {
+            total = 0L;
+            var amounts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < lines.Count; index++)
+            {
+                if (!Contains(lines[index], "Количество"))
+                {
+                    continue;
+                }
+
+                Match header = SummaryHeaderPattern.Match(lines[index]);
+                int count;
+                if (!header.Success || !int.TryParse(
+                    header.Groups["count"].Value, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out count))
+                {
+                    return false;
+                }
+
+                string kind = header.Groups["kind"].Value;
+                do
+                {
+                    index++;
+                }
+                while (index < lines.Count && string.IsNullOrWhiteSpace(lines[index]));
+
+                long amount;
+                if (index >= lines.Count ||
+                    !SummaryAmountPattern.IsMatch(lines[index]) ||
+                    !TryReadSingleAmount(lines[index], out amount) || amount < 0L ||
+                    (count == 0 && amount != 0L) || amounts.ContainsKey(kind))
+                {
+                    return false;
+                }
+
+                // ponytail: ненулевые отмены требуют проверенного примера их учёта в ленте.
+                if (string.Equals(kind, "отмен", StringComparison.OrdinalIgnoreCase) && count != 0)
+                {
+                    return false;
+                }
+
+                amounts.Add(kind, amount);
+            }
+
+            if (amounts.Count != 3)
+            {
+                return false;
+            }
+
+            total = checked(amounts["оплат"] - amounts["возвратов"]);
             return true;
         }
 
