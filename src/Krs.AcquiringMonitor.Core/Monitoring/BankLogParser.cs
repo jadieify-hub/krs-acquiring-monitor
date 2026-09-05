@@ -23,10 +23,15 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             @"close_day:\s*result=(?<result>-?\d+),\s*RC=(?<rc>[^,\s]+)",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+        private static readonly Regex CloseCommandPattern = new Regex(
+            @"Command\s*=\s*(?<command>6000|7000)\b",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         private readonly Dictionary<int, long> _totals = new Dictionary<int, long>();
         private readonly HashSet<int> _expectedDepartments;
         private PendingOperation _pendingOperation;
         private bool _pendingClose;
+        private bool _closeResultIsFinancial;
         private int _successfulCloses;
         private bool _isStale;
 
@@ -89,8 +94,15 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
                 return;
             }
 
-            if (line.IndexOf("PILOT: close_day.", StringComparison.Ordinal) >= 0)
+            // close_day also wraps statistics (7000); only 6000 starts settlement.
+            Match closeCommand = CloseCommandPattern.Match(line);
+            if (closeCommand.Success)
             {
+                _closeResultIsFinancial = closeCommand.Groups["command"].Value == "6000";
+                if (!_closeResultIsFinancial)
+                {
+                    return;
+                }
                 ActivityVersion++;
                 _pendingOperation = null;
                 _pendingClose = true;
@@ -110,12 +122,6 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
                 return;
             }
 
-            if (_pendingClose &&
-                line.IndexOf("Command = 6000", StringComparison.Ordinal) >= 0)
-            {
-                return;
-            }
-
             Match result = ResultPattern.Match(line);
             if (result.Success && _pendingOperation != null)
             {
@@ -126,7 +132,7 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             }
 
             Match closeResult = CloseResultPattern.Match(line);
-            if (closeResult.Success && _pendingClose)
+            if (closeResult.Success && _pendingClose && _closeResultIsFinancial)
             {
                 CompleteClose(
                     ParseInt(closeResult.Groups["result"].Value),

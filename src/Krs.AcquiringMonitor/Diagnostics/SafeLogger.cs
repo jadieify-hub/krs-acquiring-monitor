@@ -8,12 +8,16 @@ namespace Krs.AcquiringMonitor.Diagnostics
     public enum SafeLogEvent
     {
         ApplicationStarted,
+        ApplicationExiting,
         LogMonitorUnavailable,
         SettingsFailure,
         TerminalQueryStarted,
+        TerminalQueryDeferred,
         TerminalQueryFailed,
         TerminalQuerySucceeded,
         UpdateCheckFailed,
+        UpdateCheckCompleted,
+        UpdatePrepared,
         UpdateInstallerStarted
     }
 

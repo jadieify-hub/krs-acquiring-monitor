@@ -12,16 +12,21 @@ namespace Krs.AcquiringMonitor.UI
         private readonly AppSettings _settings;
         private readonly TextBox _directoryTextBox;
         private readonly CheckBox _autoStartCheckBox;
+        private readonly OverlayForm _preview;
+        private readonly NumericUpDown _widthEditor;
+        private readonly NumericUpDown _fontSizeEditor;
         private readonly Dictionary<int, TextBox> _nameEditors =
             new Dictionary<int, TextBox>();
         private readonly Dictionary<int, string> _originalNames =
             new Dictionary<int, string>();
 
-        private SettingsForm(
+        internal SettingsForm(
             AppSettings settings,
-            IEnumerable<int> discoveredDepartments)
+            IEnumerable<int> discoveredDepartments,
+            OverlayForm preview)
         {
             _settings = settings;
+            _preview = preview;
             Text = AppConstants.ApplicationName + " — настройки";
             Font = new Font("Segoe UI", 9.5f);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -29,7 +34,7 @@ namespace Krs.AcquiringMonitor.UI
             MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(610, 320);
+            ClientSize = new Size(610, 410);
 
             var directoryLabel = new Label
             {
@@ -133,11 +138,54 @@ namespace Krs.AcquiringMonitor.UI
             };
             Controls.Add(hint);
 
+            Controls.Add(new Label
+            {
+                Text = "Ширина оверлея:",
+                Left = 18, Top = 273, Width = 135, Height = 24
+            });
+            _widthEditor = new NumericUpDown
+            {
+                Name = "OverlayWidth",
+                AccessibleName = "Ширина оверлея",
+                Left = 156, Top = 269, Width = 95,
+                Minimum = AppSettings.MinimumOverlayWidth,
+                Maximum = AppSettings.MaximumOverlayWidth,
+                Increment = 10,
+                Value = AppSettings.NormalizeOverlayWidth(settings.OverlayWidth)
+            };
+            Controls.Add(_widthEditor);
+            Controls.Add(new Label
+            {
+                Text = "Размер шрифта:",
+                Left = 296, Top = 273, Width = 135, Height = 24
+            });
+            _fontSizeEditor = new NumericUpDown
+            {
+                Name = "OverlayFontSize",
+                AccessibleName = "Размер шрифта оверлея",
+                Left = 438, Top = 269, Width = 95,
+                Minimum = (decimal)AppSettings.MinimumOverlayFontSize,
+                Maximum = (decimal)AppSettings.MaximumOverlayFontSize,
+                DecimalPlaces = 1,
+                Increment = 0.5m,
+                Value = (decimal)AppSettings.NormalizeOverlayFontSize(settings.OverlayFontSize)
+            };
+            Controls.Add(_fontSizeEditor);
+            Controls.Add(new Label
+            {
+                Text = "Оверлей виден для настройки. Перетаскивайте название или правый край.\r\n«Отмена» вернёт прежние размеры и положение.",
+                Left = 18, Top = 305, Width = 574, Height = 40,
+                ForeColor = Color.DimGray
+            });
+            _widthEditor.ValueChanged += PreviewAppearance;
+            _fontSizeEditor.ValueChanged += PreviewAppearance;
+            _preview.PositionCommitted += PreviewPositionCommitted;
+
             _autoStartCheckBox = new CheckBox
             {
                 Text = "Запускать вместе с Windows",
                 Left = 18,
-                Top = 267,
+                Top = 360,
                 Width = 260,
                 Checked = settings.AutoStart
             };
@@ -147,7 +195,7 @@ namespace Krs.AcquiringMonitor.UI
             {
                 Text = "Сохранить",
                 Left = 392,
-                Top = 265,
+                Top = 355,
                 Width = 96,
                 Height = 32,
                 DialogResult = DialogResult.OK
@@ -159,29 +207,35 @@ namespace Krs.AcquiringMonitor.UI
             {
                 Text = "Отмена",
                 Left = 496,
-                Top = 265,
+                Top = 355,
                 Width = 96,
                 Height = 32,
                 DialogResult = DialogResult.Cancel
             };
+            cancelButton.Click += delegate { Close(); };
             Controls.Add(cancelButton);
 
             AcceptButton = okButton;
             CancelButton = cancelButton;
         }
 
-        public static bool ShowEditor(
-            IWin32Window owner,
-            AppSettings settings,
-            IEnumerable<int> discoveredDepartments)
+        protected override void Dispose(bool disposing)
         {
-            using (var form = new SettingsForm(settings, discoveredDepartments))
+            if (disposing)
             {
-                DialogResult result = owner == null
-                    ? form.ShowDialog()
-                    : form.ShowDialog(owner);
-                return result == DialogResult.OK;
+                _preview.PositionCommitted -= PreviewPositionCommitted;
             }
+            base.Dispose(disposing);
+        }
+
+        private void PreviewAppearance(object sender, EventArgs eventArgs)
+        {
+            _preview.SetAppearance((int)_widthEditor.Value, (float)_fontSizeEditor.Value);
+        }
+
+        private void PreviewPositionCommitted(object sender, EventArgs eventArgs)
+        {
+            _widthEditor.Value = _preview.PreferredWidth;
         }
 
         private void BrowseDirectory(object sender, EventArgs eventArgs)
@@ -204,6 +258,8 @@ namespace Krs.AcquiringMonitor.UI
         {
             _settings.UposDirectory = _directoryTextBox.Text.Trim();
             _settings.AutoStart = _autoStartCheckBox.Checked;
+            _settings.OverlayWidth = (int)_widthEditor.Value;
+            _settings.OverlayFontSize = (float)_fontSizeEditor.Value;
 
             foreach (KeyValuePair<int, TextBox> item in _nameEditors)
             {
@@ -239,6 +295,7 @@ namespace Krs.AcquiringMonitor.UI
                     existing.IsManual = existing.IsManual || changed;
                 }
             }
+            Close();
         }
     }
 }

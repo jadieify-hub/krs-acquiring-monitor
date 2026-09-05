@@ -45,6 +45,8 @@ namespace Krs.AcquiringMonitor.Configuration
             }
 
             settings.UposDirectory = settings.UposDirectory ?? string.Empty;
+            settings.OverlayWidth = AppSettings.NormalizeOverlayWidth(settings.OverlayWidth);
+            settings.OverlayFontSize = AppSettings.NormalizeOverlayFontSize(settings.OverlayFontSize);
             return settings;
         }
 

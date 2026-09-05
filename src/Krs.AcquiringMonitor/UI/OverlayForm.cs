@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Text;
 using System.Windows.Forms;
+using Krs.AcquiringMonitor.Configuration;
 
 namespace Krs.AcquiringMonitor.UI
 {
@@ -59,7 +60,11 @@ namespace Krs.AcquiringMonitor.UI
         private static readonly Color AttentionColor = Color.FromArgb(255, 190, 90);
         private readonly Label[] _nameControls;
         private readonly Label[] _amountControls;
-        private readonly Label _refreshControl;
+        private readonly Label _resizeGrip;
+        private readonly ToolTip _toolTip = new ToolTip { ShowAlways = true, AutoPopDelay = 15000 };
+        private int _rowCount = 1;
+        private string _refreshStatus = string.Empty;
+        private bool _refreshFailed;
         private bool _dragging;
         private Point _dragCursorOrigin;
         private Point _dragFormOrigin;
@@ -67,18 +72,22 @@ namespace Krs.AcquiringMonitor.UI
         private bool _dataStale;
         private bool _refreshDeferred;
         private bool _refreshing;
+        private int _preferredWidth = AppSettings.DefaultOverlayWidth;
+        private float _fontSize = AppSettings.DefaultOverlayFontSize;
+        private float _layoutScale = 1f;
+        private bool _resizing;
+        private int _resizeWidthOrigin;
 
         public OverlayForm()
         {
-            AutoScaleMode = AutoScaleMode.Dpi;
+            // Measure and arrange with the same DPI as DrawString; do not scale twice.
+            AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.Fuchsia;
             TransparencyKey = Color.Fuchsia;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
-            Width = 470;
-            Height = 48;
 
             var nameFont = new Font("Segoe UI", 15.5f, FontStyle.Regular);
             var amountFont = new Font("Segoe UI Semibold", 16.5f, FontStyle.Regular);
@@ -93,10 +102,6 @@ namespace Krs.AcquiringMonitor.UI
                     BackColor = Color.Transparent,
                     ForeColor = Color.White,
                     Font = nameFont,
-                    Left = 4,
-                    Top = 4 + index * 36,
-                    Width = 268,
-                    Height = 32,
                     Cursor = Cursors.SizeAll,
                     TextAlign = ContentAlignment.MiddleLeft
                 };
@@ -112,41 +117,32 @@ namespace Krs.AcquiringMonitor.UI
                     BackColor = Color.Transparent,
                     ForeColor = Color.White,
                     Font = amountFont,
-                    Left = 276,
-                    Top = 4 + index * 36,
-                    Width = 160,
-                    Height = 32,
+                    Cursor = Cursors.Hand,
                     TextAlign = ContentAlignment.MiddleLeft
                 };
+                amount.MouseDoubleClick += RequestRefresh;
                 Controls.Add(amount);
                 _amountControls[index] = amount;
             }
 
-            _refreshControl = new OverlayTextLabel
+            _resizeGrip = new OverlayTextLabel
             {
-                AutoSize = false,
-                BackColor = Color.Transparent,
+                Text = "⋮",
+                Font = new Font("Segoe UI Symbol", 12f, FontStyle.Regular),
                 ForeColor = Color.White,
-                Text = "↻",
-                Font = new Font("Segoe UI Symbol", 17f, FontStyle.Bold),
-                Left = 440,
-                Top = 7,
-                Width = 28,
-                Height = 30,
-                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.SizeWE,
                 TextAlign = ContentAlignment.MiddleCenter,
-                AccessibleName = "Обновить суммы из терминала",
-                AccessibleRole = AccessibleRole.PushButton
+                AccessibleName = "Изменить ширину оверлея",
+                AccessibleRole = AccessibleRole.Grip
             };
-            _refreshControl.Click += delegate
-            {
-                EventHandler handler = RefreshRequested;
-                if (handler != null)
-                {
-                    handler(this, EventArgs.Empty);
-                }
-            };
-            Controls.Add(_refreshControl);
+            _resizeGrip.MouseDown += BeginResize;
+            _resizeGrip.MouseMove += ContinueResize;
+            _resizeGrip.MouseUp += EndResize;
+            Controls.Add(_resizeGrip);
+            _toolTip.SetToolTip(_resizeGrip, "Потяните край, чтобы изменить ширину. Шрифт не меняется.");
+            LayoutRows();
+            UpdateRefreshState();
         }
 
         public event EventHandler RefreshRequested;
@@ -155,7 +151,42 @@ namespace Krs.AcquiringMonitor.UI
 
         public bool IsUserDragging
         {
-            get { return _dragging; }
+            get { return _dragging || _resizing; }
+        }
+
+        public int PreferredWidth
+        {
+            get { return _preferredWidth; }
+        }
+
+        public void CancelDrag()
+        {
+            _dragging = false;
+            _resizing = false;
+            foreach (Label name in _nameControls) name.Capture = false;
+            _resizeGrip.Capture = false;
+        }
+
+        public void SetAppearance(int width, float fontSize)
+        {
+            _preferredWidth = AppSettings.NormalizeOverlayWidth(width);
+            fontSize = AppSettings.NormalizeOverlayFontSize(fontSize);
+            if (_fontSize != fontSize)
+            {
+                Font oldNameFont = _nameControls[0].Font;
+                Font oldAmountFont = _amountControls[0].Font;
+                var nameFont = new Font("Segoe UI", fontSize, FontStyle.Regular);
+                var amountFont = new Font("Segoe UI Semibold", fontSize + 1f, FontStyle.Regular);
+                for (int i = 0; i < 2; i++)
+                {
+                    _nameControls[i].Font = nameFont;
+                    _amountControls[i].Font = amountFont;
+                }
+                oldNameFont.Dispose();
+                oldAmountFont.Dispose();
+                _fontSize = fontSize;
+            }
+            LayoutRows();
         }
 
         public Point RelativeOffset
@@ -189,7 +220,7 @@ namespace Krs.AcquiringMonitor.UI
         {
             int count = Math.Max(1, Math.Min(2, rows == null ? 0 : rows.Count));
             bool dataStale = false;
-            Height = 10 + count * 36;
+            _rowCount = count;
             for (int index = 0; index < 2; index++)
             {
                 bool visible = index < count && rows != null && index < rows.Count;
@@ -204,42 +235,129 @@ namespace Krs.AcquiringMonitor.UI
                 _nameControls[index].Text = row.OrganizationName;
                 _nameControls[index].ForeColor = Color.White;
                 _amountControls[index].Text = row.AmountText;
-                _amountControls[index].ForeColor = Color.White;
                 dataStale = dataStale || row.IsStale;
             }
 
             SetDataStale(dataStale);
-            _refreshControl.Top = Math.Max(5, (Height - _refreshControl.Height) / 2);
+            LayoutRows();
+        }
+
+        private void LayoutRows()
+        {
+            using (Graphics graphics = CreateGraphics())
+            {
+                LayoutRows(graphics);
+            }
+        }
+
+        internal void LayoutRows(Graphics graphics)
+        {
+            float scale = graphics.DpiX / 96f;
+            _layoutScale = scale;
+            Func<int, int> pixels = value => (int)Math.Ceiling(value * scale);
+            graphics.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+            int amountWidth = 0;
+            for (int index = 0; index < _rowCount; index++)
+            {
+                amountWidth = Math.Max(amountWidth, (int)Math.Ceiling(
+                    graphics.MeasureString(_amountControls[index].Text,
+                        _amountControls[index].Font).Width) + pixels(8));
+            }
+
+            int nameWidth = Math.Max(pixels(64), pixels(_preferredWidth) - amountWidth - pixels(24));
+            int rowHeight = Math.Max(pixels(32),
+                (int)Math.Ceiling(_amountControls[0].Font.GetHeight(graphics)) + pixels(2));
+            int rowStep = rowHeight + pixels(4);
+            for (int index = 0; index < 2; index++)
+            {
+                _nameControls[index].Bounds = new Rectangle(
+                    pixels(4), pixels(4) + index * rowStep, nameWidth, rowHeight);
+                _amountControls[index].Bounds = new Rectangle(
+                    _nameControls[index].Right + pixels(4),
+                    pixels(4) + index * rowStep, amountWidth, rowHeight);
+            }
+            Height = pixels(10) + _rowCount * rowStep;
+            _resizeGrip.Bounds = new Rectangle(
+                _amountControls[0].Right + pixels(2), 0, pixels(12), Height);
+            Width = _resizeGrip.Right + pixels(2);
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs eventArgs)
+        {
+            base.OnDpiChanged(eventArgs);
+            LayoutRows();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _toolTip.Dispose();
+                _nameControls[0].Font.Dispose();
+                _amountControls[0].Font.Dispose();
+                _resizeGrip.Font.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public void SetRefreshStatus(string status, bool failed = false)
+        {
+            _refreshStatus = status;
+            _refreshFailed = failed;
+            UpdateRefreshState();
         }
 
         public void SetDataStale(bool dataStale)
         {
             _dataStale = dataStale;
-            UpdateRefreshControl();
+            UpdateRefreshState();
         }
 
         public void SetRefreshDeferred(bool refreshDeferred)
         {
             _refreshDeferred = refreshDeferred;
-            UpdateRefreshControl();
+            UpdateRefreshState();
         }
 
         public void SetRefreshing(bool refreshing)
         {
             _refreshing = refreshing;
-            UpdateRefreshControl();
+            if (refreshing)
+            {
+                _refreshStatus = string.Empty;
+                _refreshFailed = false;
+            }
+            UpdateRefreshState();
         }
 
-        private void UpdateRefreshControl()
+        private void RequestRefresh(object sender, MouseEventArgs eventArgs)
         {
-            _refreshControl.Enabled = !_refreshing;
-            _refreshControl.Text = _refreshing ? "…" : "↻";
-            _refreshControl.Cursor = _refreshing
-                ? Cursors.WaitCursor
-                : Cursors.Hand;
-            _refreshControl.ForeColor = !_refreshing && (_dataStale || _refreshDeferred)
-                ? AttentionColor
-                : Color.White;
+            if (_refreshing || eventArgs.Button != MouseButtons.Left) return;
+            EventHandler handler = RefreshRequested;
+            if (handler != null) handler(this, EventArgs.Empty);
+        }
+
+        private void UpdateRefreshState()
+        {
+            string status = _refreshing
+                ? "Запрашиваются итоги терминала…"
+                : !string.IsNullOrEmpty(_refreshStatus)
+                    ? _refreshStatus
+                    : _refreshDeferred
+                        ? "Запрос ожидает завершения операции и восстановления журнала."
+                        : _dataStale
+                            ? "Данные устарели: журнал недоступен или закрытие смены ещё не завершено."
+                            : string.Empty;
+            string hint = "Двойной щелчок по сумме — обновить итоги всех организаций из терминала.";
+            if (!string.IsNullOrEmpty(status)) hint = status + Environment.NewLine + hint;
+            foreach (Label amount in _amountControls)
+            {
+                amount.Cursor = _refreshing ? Cursors.WaitCursor : Cursors.Hand;
+                amount.ForeColor = _dataStale || _refreshDeferred || _refreshFailed
+                    ? AttentionColor : Color.White;
+                amount.AccessibleDescription = hint;
+                _toolTip.SetToolTip(amount, hint);
+            }
         }
 
         public void PlaceRelativeTo(
@@ -248,7 +366,7 @@ namespace Krs.AcquiringMonitor.UI
             int offsetY)
         {
             _frontolBounds = frontolBounds;
-            if (_dragging)
+            if (IsUserDragging)
             {
                 return;
             }
@@ -299,6 +417,37 @@ namespace Krs.AcquiringMonitor.UI
 
             ((Control)sender).Capture = false;
             _dragging = false;
+            CommitPosition();
+        }
+
+        private void BeginResize(object sender, MouseEventArgs eventArgs)
+        {
+            if (eventArgs.Button != MouseButtons.Left) return;
+            _resizing = true;
+            _resizeWidthOrigin = Width;
+            _dragCursorOrigin = _resizeGrip.PointToScreen(eventArgs.Location);
+            _resizeGrip.Capture = true;
+        }
+
+        private void ContinueResize(object sender, MouseEventArgs eventArgs)
+        {
+            if (!_resizing || eventArgs.Button != MouseButtons.Left) return;
+            int width = (int)Math.Round(
+                (_resizeWidthOrigin + _resizeGrip.PointToScreen(eventArgs.Location).X -
+                    _dragCursorOrigin.X) / _layoutScale);
+            SetAppearance(Math.Max(AppSettings.MinimumOverlayWidth, width), _fontSize);
+        }
+
+        private void EndResize(object sender, MouseEventArgs eventArgs)
+        {
+            if (!_resizing) return;
+            _resizeGrip.Capture = false;
+            _resizing = false;
+            CommitPosition();
+        }
+
+        private void CommitPosition()
+        {
             EventHandler handler = PositionCommitted;
             if (handler != null)
             {

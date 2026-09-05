@@ -10,33 +10,40 @@ using Krs.AcquiringMonitor.Diagnostics;
 
 namespace Krs.AcquiringMonitor.Updates
 {
-    public sealed class StartupUpdater
+    public sealed class ApplicationUpdater
     {
         private const string ManifestUrl =
             "https://github.com/jadieify-hub/krs-acquiring-monitor/releases/latest/download/update.json";
         private const string InstallerArguments =
-            "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /SP-";
+            "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SP-";
         private readonly SafeLogger _logger;
+        private string _installerPath;
+        private string _installerSha256;
 
-        public StartupUpdater(SafeLogger logger)
+        public ApplicationUpdater(SafeLogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException("logger");
         }
 
-        public async Task<bool> CheckAndInstallAsync(
+        public bool HasPreparedUpdate
+        {
+            get { return _installerPath != null; }
+        }
+
+        public async Task CheckAndDownloadAsync(
             Version currentVersion,
             CancellationToken cancellationToken)
         {
-            if (currentVersion == null ||
+            if (HasPreparedUpdate || currentVersion == null ||
                 !File.Exists(Path.Combine(
                     AppDomain.CurrentDomain.BaseDirectory,
                     "unins000.exe")))
             {
-                return false;
+                return;
             }
 
             string installerPath = null;
-            bool started = false;
+            bool prepared = false;
             try
             {
                 string manifestJson;
@@ -53,7 +60,7 @@ namespace Krs.AcquiringMonitor.Updates
                     {
                         if (response.StatusCode == HttpStatusCode.NotFound)
                         {
-                            return false;
+                            return;
                         }
 
                         if (!response.IsSuccessStatusCode)
@@ -62,7 +69,7 @@ namespace Krs.AcquiringMonitor.Updates
                                 SafeLogEvent.UpdateCheckFailed,
                                 "manifest-http-" + (int)response.StatusCode,
                                 null);
-                            return false;
+                            return;
                         }
 
                         manifestJson = await response.Content.ReadAsStringAsync();
@@ -75,10 +82,10 @@ namespace Krs.AcquiringMonitor.Updates
                             out update))
                     {
                         _logger.Write(
-                            SafeLogEvent.UpdateCheckFailed,
-                            "manifest-not-selected",
+                            SafeLogEvent.UpdateCheckCompleted,
+                            "no-newer-valid-release",
                             null);
-                        return false;
+                        return;
                     }
 
                     string updateDirectory = Path.Combine(
@@ -106,7 +113,7 @@ namespace Krs.AcquiringMonitor.Updates
                                     SafeLogEvent.UpdateCheckFailed,
                                     "installer-http-" + (int)response.StatusCode,
                                     null);
-                                return false;
+                                return;
                             }
 
                             using (Stream source =
@@ -133,16 +140,77 @@ namespace Krs.AcquiringMonitor.Updates
                             SafeLogEvent.UpdateCheckFailed,
                             "installer-hash",
                             null);
-                        return false;
+                        return;
                     }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _installerPath = installerPath;
+                    _installerSha256 = update.Sha256;
                 }
 
+                prepared = true;
+                _logger.Write(SafeLogEvent.UpdatePrepared, "verified-waiting-for-idle", null);
+            }
+            catch (OperationCanceledException exception)
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.Write(SafeLogEvent.UpdateCheckFailed, "timeout", exception);
+                }
+            }
+            catch (HttpRequestException exception)
+            {
+                _logger.Write(SafeLogEvent.UpdateCheckFailed, "network", exception);
+            }
+            catch (IOException exception)
+            {
+                _logger.Write(SafeLogEvent.UpdateCheckFailed, "file", exception);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                _logger.Write(SafeLogEvent.UpdateCheckFailed, "access", exception);
+            }
+            catch (Exception exception)
+            {
+                _logger.Write(SafeLogEvent.UpdateCheckFailed, "unexpected", exception);
+            }
+            finally
+            {
+                if (!prepared)
+                {
+                    TryDeleteFile(installerPath);
+                }
+            }
+        }
+
+        public bool TryStartInstaller()
+        {
+            if (!HasPreparedUpdate)
+            {
+                return false;
+            }
+            string installerPath = _installerPath;
+            _installerPath = null;
+            bool started = false;
+            try
+            {
+                // The download may have waited hours; verify again immediately before execution.
+                if (!UpdateManifest.HashMatches(installerPath, _installerSha256))
+                {
+                    _logger.Write(SafeLogEvent.UpdateCheckFailed, "installer-hash", null);
+                    return false;
+                }
+                string applicationDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+                string logPath = Path.Combine(Path.GetDirectoryName(installerPath), "installer.log");
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = installerPath,
-                    Arguments = InstallerArguments,
+                    Arguments = InstallerArguments +
+                        " /WAITPID=" + Process.GetCurrentProcess().Id +
+                        " /DIR=\"" + applicationDirectory + "\"" +
+                        " /LOG=\"" + logPath + "\"",
                     WorkingDirectory = Path.GetDirectoryName(installerPath),
-                    UseShellExecute = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
                 using (Process process = Process.Start(startInfo))
@@ -163,26 +231,6 @@ namespace Krs.AcquiringMonitor.Updates
                     "verified",
                     null);
                 return true;
-            }
-            catch (OperationCanceledException exception)
-            {
-                if (!cancellationToken.IsCancellationRequested)
-                {
-                    _logger.Write(
-                        SafeLogEvent.UpdateCheckFailed,
-                        "timeout",
-                        exception);
-                }
-
-                return false;
-            }
-            catch (HttpRequestException exception)
-            {
-                _logger.Write(
-                    SafeLogEvent.UpdateCheckFailed,
-                    "network",
-                    exception);
-                return false;
             }
             catch (IOException exception)
             {

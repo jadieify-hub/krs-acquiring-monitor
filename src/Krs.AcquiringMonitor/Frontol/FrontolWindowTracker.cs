@@ -22,6 +22,10 @@ namespace Krs.AcquiringMonitor.Frontol
 
     public sealed class FrontolWindowTracker
     {
+        private IntPtr _identityWindow;
+        private uint _identityProcessId;
+        private string _processName = string.Empty;
+
         public bool TryGetActive(out FrontolWindowInfo info)
         {
             info = null;
@@ -39,7 +43,15 @@ namespace Krs.AcquiringMonitor.Frontol
             {
                 using (Process process = Process.GetProcessById((int)processId))
                 {
-                    processName = process.ProcessName;
+                    // On .NET Framework ProcessName enumerates system process information.
+                    // The identity cannot change while this foreground HWND/PID pair stays alive.
+                    if (_identityWindow != foregroundWindow || _identityProcessId != processId)
+                    {
+                        _processName = process.ProcessName;
+                        _identityWindow = foregroundWindow;
+                        _identityProcessId = processId;
+                    }
+                    processName = _processName;
                     mainWindowTitle = process.MainWindowTitle;
                 }
             }

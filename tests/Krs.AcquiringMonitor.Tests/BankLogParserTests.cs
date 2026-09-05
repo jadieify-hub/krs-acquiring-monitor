@@ -174,6 +174,22 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.Equal(0L, parser.Snapshot.Totals[2]);
         }
 
+        public static void StatisticsDoesNotCompleteInterruptedClose()
+        {
+            var parser = new BankLogParser();
+            Purchase(parser, 1, 10000, true);
+            parser.ProcessLine("01.09 10:00:00.000 PILOT: close_day.");
+            parser.ProcessLine("01.09 10:00:00.010 SBKRNL: Command = 6000");
+            long revision = parser.ActivityVersion;
+            parser.ProcessLine("01.09 10:02:00.000 PILOT: close_day.");
+            parser.ProcessLine("01.09 10:02:00.010 SBKRNL: Command = 7000");
+            parser.ProcessLine("01.09 10:02:00.100 PILOT: close_day: result=0, RC=0");
+            TestAssert.Equal(10000L, parser.Snapshot.Totals[1]);
+            TestAssert.True(parser.HasPendingOperation,
+                "Успешная статистика не подтверждает прерванное закрытие смены.");
+            TestAssert.Equal(revision, parser.ActivityVersion);
+        }
+
         private static BankLogParser ParserWithTwoDepartments()
         {
             var parser = new BankLogParser();

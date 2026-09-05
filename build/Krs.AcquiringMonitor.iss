@@ -1,6 +1,6 @@
 #define MyAppName "KRS Эквайринг Монитор"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.2"
+  #define MyAppVersion "0.2.5"
 #endif
 #define MyAppPublisher "KRS"
 #define MyAppExeName "Krs.AcquiringMonitor.exe"
@@ -27,6 +27,9 @@ VersionInfoDescription=Установщик {#MyAppName}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoVersion={#MyAppVersion}
+RestartApplications=no
+CloseApplications=force
+CloseApplicationsFilter=Krs.AcquiringMonitor.exe,Krs.AcquiringMonitor.TerminalQuery.exe,Krs.AcquiringMonitor.Core.dll
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
@@ -56,6 +59,41 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExeName}"; Description: "Запустить {#MyAppName}"; Flags: nowait postinstall
 
 [Code]
+function OpenProcess(Access: LongWord; InheritHandle: Boolean; ProcessId: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+function GetLastError(): LongWord;
+  external 'GetLastError@kernel32.dll stdcall';
+
+function InitializeSetup(): Boolean;
+var
+  ParentId: Integer;
+  ParentHandle: THandle;
+begin
+  Result := True;
+  ParentId := StrToIntDef(ExpandConstant('{param:WAITPID|0}'), 0);
+  if ParentId <= 0 then
+    Exit;
+
+  Log('Waiting for the previous monitor process to exit.');
+  ParentHandle := OpenProcess($00100000, False, ParentId);
+  if ParentHandle = 0 then
+    Result := GetLastError() = 87 { ERROR_INVALID_PARAMETER: already exited }
+  else begin
+    Result := WaitForSingleObject(ParentHandle, 30000) = 0;
+    CloseHandle(ParentHandle);
+  end;
+  if not Result then begin
+    Log('Previous monitor did not exit within 30 seconds. Installation cancelled.');
+    SuppressibleMsgBox(
+      'Предыдущая версия монитора не завершилась за 30 секунд. Установка отменена. Закройте монитор через трей и повторите установку.',
+      mbError, MB_OK, IDOK);
+  end;
+end;
+
 function ShouldMigrateAutoStart(): Boolean;
 begin
   Result := RegValueExists(

@@ -82,6 +82,8 @@ namespace Krs.AcquiringMonitor.Tests
                 var settings = AppSettings.CreateDefault();
                 settings.UposDirectory = @"C:\SC552";
                 settings.OverlayOffsetX = 444;
+                settings.OverlayWidth = 610;
+                settings.OverlayFontSize = 18f;
                 settings.Organizations.Add(
                     new OrganizationSetting
                     {
@@ -96,6 +98,8 @@ namespace Krs.AcquiringMonitor.Tests
 
                 TestAssert.Equal(@"C:\SC552", loaded.UposDirectory);
                 TestAssert.Equal(444, loaded.OverlayOffsetX);
+                TestAssert.Equal(610, loaded.OverlayWidth);
+                TestAssert.Equal(18f, loaded.OverlayFontSize);
                 TestAssert.Equal("ИП Иванов", loaded.Organizations[0].BankName);
                 TestAssert.Equal("Главная касса", loaded.Organizations[0].DisplayName);
             }
@@ -119,6 +123,20 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.Equal(
                 "Главная касса",
                 settings.GetOrganizationNames()[1]);
+        }
+
+        public static void OldSettingsKeepDefaultAppearance()
+        {
+            using (var directory = new TemporaryDirectory())
+            {
+                File.WriteAllText(Path.Combine(directory.Path, "settings.json"),
+                    "{\"OverlayOffsetX\":444,\"AutoStart\":true,\"Organizations\":[]}");
+                AppSettings loaded = new SettingsStore(directory.Path).LoadSettings();
+                TestAssert.Equal(444, loaded.OverlayOffsetX);
+                TestAssert.True(loaded.AutoStart, "Старый автозапуск должен сохраниться.");
+                TestAssert.Equal(AppSettings.DefaultOverlayWidth, loaded.OverlayWidth);
+                TestAssert.Equal(AppSettings.DefaultOverlayFontSize, loaded.OverlayFontSize);
+            }
         }
 
         public static void RejectsUnstableRuntimeCheckpoint()
@@ -208,11 +226,22 @@ namespace Krs.AcquiringMonitor.Tests
                     monitor.RefreshNow();
                     long revision = monitor.CaptureRevision();
 
-                    File.AppendAllText(
-                        logPath,
-                        "01.09 10:02:00.000 PILOT: get_statistics.\r\n" +
-                        "01.09 10:02:00.100 PILOT: get_statistics: result=0\r\n");
-                    monitor.RefreshNow();
+                    // UPOS logs statistics (7000) through close_day, just like settlement (6000).
+                    foreach (string line in new[]
+                    {
+                        "01.09 10:02:00.000 PILOT: close_day. Version: 34.09.03",
+                        "01.09 10:02:00.010 SBKRNL: Command = 7000",
+                        "01.09 10:02:00.100 PILOT: close_day: result=0, RC=0"
+                    })
+                    {
+                        File.AppendAllText(logPath, line + "\r\n");
+                        monitor.RefreshNow();
+                        TestAssert.Equal(10000L, monitor.CurrentSnapshot.Totals[1]);
+                        TestAssert.False(monitor.CurrentSnapshot.IsStale,
+                            "Статистика не должна начинать закрытие смены.");
+                        TestAssert.False(monitor.HasPendingOperation,
+                            "Статистика не является финансовой операцией.");
+                    }
                     bool applied = monitor.TryApplyAuthoritativeTotals(
                         new Dictionary<int, long> { { 1, 12500L } },
                         revision);

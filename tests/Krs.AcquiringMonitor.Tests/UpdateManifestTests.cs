@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Reflection;
+using Krs.AcquiringMonitor.Diagnostics;
 using Krs.AcquiringMonitor.Updates;
 
 namespace Krs.AcquiringMonitor.Tests
@@ -121,6 +123,32 @@ namespace Krs.AcquiringMonitor.Tests
             finally
             {
                 File.Delete(path);
+            }
+        }
+
+        public static void RejectsInstallerChangedWhileWaiting()
+        {
+            string directory = Path.Combine(Path.GetTempPath(),
+                "KRS-AcquiringMonitor-update-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "setup.exe");
+            try
+            {
+                File.WriteAllText(path, "changed after download", Encoding.ASCII);
+                var updater = new ApplicationUpdater(new SafeLogger(directory));
+                typeof(ApplicationUpdater).GetField("_installerPath",
+                    BindingFlags.Instance | BindingFlags.NonPublic).SetValue(updater, path);
+                typeof(ApplicationUpdater).GetField("_installerSha256",
+                    BindingFlags.Instance | BindingFlags.NonPublic).SetValue(updater,
+                        "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD");
+                TestAssert.False(updater.TryStartInstaller(), "Изменённый установщик не запускается.");
+                TestAssert.False(updater.HasPreparedUpdate, "Повреждённое обновление снимается с ожидания.");
+                TestAssert.True(File.ReadAllText(Path.Combine(directory, "diagnostics.log"))
+                    .Contains("installer-hash"), "Причина отказа должна попасть в диагностику.");
+            }
+            finally
+            {
+                Directory.Delete(directory, true);
             }
         }
     }

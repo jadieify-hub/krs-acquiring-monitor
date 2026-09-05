@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
@@ -7,6 +8,13 @@ namespace Krs.AcquiringMonitor.Configuration
     [DataContract]
     public sealed class AppSettings
     {
+        public const int DefaultOverlayWidth = 470;
+        public const int MinimumOverlayWidth = 200;
+        public const int MaximumOverlayWidth = 1600;
+        public const float DefaultOverlayFontSize = 15.5f;
+        public const float MinimumOverlayFontSize = 8f;
+        public const float MaximumOverlayFontSize = 32f;
+
         public AppSettings()
         {
             UposDirectory = string.Empty;
@@ -31,6 +39,25 @@ namespace Krs.AcquiringMonitor.Configuration
         [DataMember(Order = 6)]
         public List<OrganizationSetting> Organizations { get; set; }
 
+        [DataMember(Order = 7)]
+        public int OverlayWidth { get; set; }
+
+        [DataMember(Order = 8)]
+        public float OverlayFontSize { get; set; }
+
+        public static int NormalizeOverlayWidth(int value)
+        {
+            return value <= 0 ? DefaultOverlayWidth :
+                Math.Max(MinimumOverlayWidth, Math.Min(MaximumOverlayWidth, value));
+        }
+
+        public static float NormalizeOverlayFontSize(float value)
+        {
+            return value <= 0 || float.IsNaN(value) || float.IsInfinity(value)
+                ? DefaultOverlayFontSize
+                : Math.Max(MinimumOverlayFontSize, Math.Min(MaximumOverlayFontSize, value));
+        }
+
         public static AppSettings CreateDefault()
         {
             return new AppSettings
@@ -38,6 +65,8 @@ namespace Krs.AcquiringMonitor.Configuration
                 OverlayOffsetX = 620,
                 OverlayOffsetY = 55,
                 HasCustomPosition = false,
+                OverlayWidth = DefaultOverlayWidth,
+                OverlayFontSize = DefaultOverlayFontSize,
                 AutoStart = true
             };
         }

@@ -25,14 +25,14 @@ namespace Krs.AcquiringMonitor
         private readonly SafeLogger _logger;
         private readonly FrontolWindowTracker _frontolTracker;
         private readonly TerminalStatisticsClient _terminalClient;
-        private readonly StartupUpdater _startupUpdater;
+        private readonly ApplicationUpdater _updater;
+        private readonly UpdateSchedule _updateSchedule;
         private readonly CancellationTokenSource _lifetimeCancellation;
         private readonly OverlayForm _overlay;
         private readonly NotifyIcon _trayIcon;
         private readonly System.Windows.Forms.Timer _frontolTimer;
         private readonly System.Windows.Forms.Timer _maintenanceTimer;
         private readonly AutomaticNameRefreshPolicy _automaticNameRefreshPolicy;
-        private System.Windows.Forms.Timer _updateTimer;
         private System.Windows.Forms.Timer _firstRunTimer;
         private AppSettings _settings;
         private BankLogMonitor _logMonitor;
@@ -40,7 +40,8 @@ namespace Krs.AcquiringMonitor
         private bool _refreshing;
         private bool _manualRefreshPending;
         private bool _manualRefreshNoticeShown;
-        private bool _settingsEditing;
+        private SettingsForm _settingsForm;
+        private bool _updateChecking;
         private bool _exiting;
 
         public MonitorApplicationContext()
@@ -54,15 +55,18 @@ namespace Krs.AcquiringMonitor
             }
 
             _logger = new SafeLogger(_settingsStore.BaseDirectory);
-            _startupUpdater = new StartupUpdater(_logger);
+            _updater = new ApplicationUpdater(_logger);
+            _updateSchedule = new UpdateSchedule(DateTimeOffset.UtcNow);
             _frontolTracker = new FrontolWindowTracker();
             _terminalClient = new TerminalStatisticsClient();
             _automaticNameRefreshPolicy = new AutomaticNameRefreshPolicy(
                 DateTimeOffset.UtcNow.AddSeconds(30));
             _lifetimeCancellation = new CancellationTokenSource();
             _overlay = new OverlayForm();
+            _overlay.SetAppearance(_settings.OverlayWidth, _settings.OverlayFontSize);
             _overlay.RefreshRequested += RefreshFromTerminal;
             _overlay.PositionCommitted += SaveOverlayPosition;
+            _overlay.FormClosed += ExitApplication;
             IntPtr unusedHandle = _overlay.Handle;
 
             _trayIcon = new NotifyIcon
@@ -76,7 +80,7 @@ namespace Krs.AcquiringMonitor
 
             _frontolTimer = new System.Windows.Forms.Timer
             {
-                Interval = 250
+                Interval = 1000
             };
             _frontolTimer.Tick += TrackFrontol;
             _frontolTimer.Start();
@@ -85,15 +89,8 @@ namespace Krs.AcquiringMonitor
             {
                 Interval = 1000
             };
-            _maintenanceTimer.Tick += CheckScheduledTerminalRefresh;
+            _maintenanceTimer.Tick += CheckScheduledMaintenance;
             _maintenanceTimer.Start();
-
-            _updateTimer = new System.Windows.Forms.Timer
-            {
-                Interval = 3000
-            };
-            _updateTimer.Tick += CheckForUpdate;
-            _updateTimer.Start();
 
             ApplyAutoStart();
             RestartLogMonitor();
@@ -120,21 +117,20 @@ namespace Krs.AcquiringMonitor
                 return;
             }
 
+            // Persist the latest complete checkpoint before the installer replaces our files.
+            LogSnapshotChanged(_logMonitor, null);
             _exiting = true;
+            if (_settingsForm != null)
+            {
+                _settingsForm.Close();
+            }
+            _logger.Write(SafeLogEvent.ApplicationExiting, "requested", null);
             _lifetimeCancellation.Cancel();
             _terminalClient.CancelActiveQuery();
             _frontolTimer.Stop();
             _frontolTimer.Dispose();
             _maintenanceTimer.Stop();
             _maintenanceTimer.Dispose();
-            if (_updateTimer != null)
-            {
-                _updateTimer.Stop();
-                _updateTimer.Tick -= CheckForUpdate;
-                _updateTimer.Dispose();
-                _updateTimer = null;
-            }
-
             if (_firstRunTimer != null)
             {
                 _firstRunTimer.Stop();
@@ -283,6 +279,12 @@ namespace Krs.AcquiringMonitor
 
         private void TrackFrontol(object sender, EventArgs eventArgs)
         {
+            if (_settingsForm != null)
+            {
+                if (!_overlay.Visible) _overlay.Show();
+                return;
+            }
+
             FrontolWindowInfo info;
             if (!_frontolTracker.TryGetActive(out info))
             {
@@ -307,49 +309,69 @@ namespace Krs.AcquiringMonitor
 
         private void RefreshFromTerminal(object sender, EventArgs eventArgs)
         {
-            if (_refreshing || _manualRefreshPending)
+            if (_refreshing)
             {
                 return;
             }
 
+            if (_manualRefreshPending)
+            {
+                MessageBox.Show(
+                    GetDeferredRefreshMessage(), AppConstants.ApplicationName,
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             _manualRefreshPending = true;
             _manualRefreshNoticeShown = false;
+            _overlay.SetRefreshStatus(string.Empty);
             _overlay.SetRefreshDeferred(true);
             TryStartScheduledTerminalRefresh();
         }
 
-        private void CheckScheduledTerminalRefresh(
+        private async void CheckScheduledMaintenance(
             object sender,
             EventArgs eventArgs)
         {
-            TryStartScheduledTerminalRefresh();
-        }
-
-        private async void CheckForUpdate(object sender, EventArgs eventArgs)
-        {
-            if (_settingsEditing || _refreshing || _updateTimer == null)
+            if (_exiting)
             {
                 return;
             }
 
-            System.Windows.Forms.Timer timer = _updateTimer;
-            _updateTimer = null;
-            timer.Stop();
-            timer.Tick -= CheckForUpdate;
-            timer.Dispose();
-
-            bool installerStarted = await _startupUpdater.CheckAndInstallAsync(
-                AppConstants.ApplicationVersion,
-                _lifetimeCancellation.Token);
-            if (installerStarted && !_exiting)
+            if (_updater.HasPreparedUpdate && _logMonitor != null)
             {
-                ExitThread();
+                _logMonitor.RefreshNow();
+                if (_updateSchedule.CanInstall(
+                        DateTimeOffset.UtcNow, _logMonitor.CaptureRevision(),
+                        _settingsForm != null || _refreshing || _manualRefreshPending ||
+                        Application.OpenForms.Count > 1 ||
+                        _overlay.IsUserDragging || _logMonitor.HasPendingOperation) &&
+                    _updater.TryStartInstaller())
+                {
+                    ExitThread();
+                    return;
+                }
+            }
+
+            TryStartScheduledTerminalRefresh();
+            if (!_updateChecking && !_updater.HasPreparedUpdate &&
+                _updateSchedule.TryBeginCheck(DateTimeOffset.UtcNow))
+            {
+                _updateChecking = true;
+                try
+                {
+                    await _updater.CheckAndDownloadAsync(
+                        AppConstants.ApplicationVersion, _lifetimeCancellation.Token);
+                }
+                finally
+                {
+                    _updateChecking = false;
+                }
             }
         }
 
         private void TryStartScheduledTerminalRefresh()
         {
-            if (_exiting || _settingsEditing)
+            if (_exiting || _settingsForm != null)
             {
                 return;
             }
@@ -407,16 +429,47 @@ namespace Krs.AcquiringMonitor
 
         private void ShowDeferredRefreshNotice()
         {
+            if (_manualRefreshPending)
+            {
+                _overlay.SetRefreshStatus(GetDeferredRefreshMessage());
+            }
             if (!_manualRefreshPending || _manualRefreshNoticeShown)
             {
                 return;
             }
 
             _manualRefreshNoticeShown = true;
+            _logger.Write(SafeLogEvent.TerminalQueryDeferred,
+                _logMonitor != null && _logMonitor.HasPendingOperation ? "bank-operation" : "log-stale",
+                null);
             ShowBalloon(
                 "Обновление запланировано",
-                "Суммы обновятся автоматически сразу после завершения текущей операции и восстановления журнала UPOS.",
+                GetDeferredRefreshMessage(),
                 ToolTipIcon.Warning);
+        }
+
+        private string GetDeferredRefreshMessage()
+        {
+            return _logMonitor != null && _logMonitor.HasPendingOperation
+                ? "Запрос принят. В журнале UPOS ещё не завершена банковская операция. Итоги обновятся после её завершения."
+                : "Запрос принят. Журнал UPOS недоступен или закрытие смены завершено не для всех отделов. Запрос выполнится после восстановления журнала.";
+        }
+
+        private void ShowRefreshResult(string title, string message, bool interactive, bool failed)
+        {
+            if (_exiting)
+            {
+                return;
+            }
+            _overlay.SetRefreshStatus(title + ". " + message, failed);
+            if (interactive && failed)
+            {
+                MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else if (interactive)
+            {
+                ShowBalloon(title, message, ToolTipIcon.Info);
+            }
         }
 
         private async void QueryTerminalAsync(
@@ -448,13 +501,8 @@ namespace Krs.AcquiringMonitor
                         SafeLogEvent.TerminalQueryFailed,
                         "helper",
                         null);
-                    if (interactive)
-                    {
-                        ShowBalloon(
-                            "Не удалось получить итоги",
-                            result.ErrorMessage,
-                            ToolTipIcon.Error);
-                    }
+                    ShowRefreshResult("Не удалось получить итоги",
+                        result.ErrorMessage, interactive, true);
 
                     return;
                 }
@@ -467,13 +515,9 @@ namespace Krs.AcquiringMonitor
                         SafeLogEvent.TerminalQueryFailed,
                         "report-format",
                         null);
-                    if (interactive)
-                    {
-                        ShowBalloon(
-                            "Отчёт не применён",
-                            "Не удалось однозначно определить суммы организаций.",
-                            ToolTipIcon.Warning);
-                    }
+                    ShowRefreshResult("Отчёт не применён",
+                        "Формат отчёта терминала не распознан (report-format). " +
+                        "Суммы по журналу не изменены.", interactive, true);
 
                     return;
                 }
@@ -490,13 +534,9 @@ namespace Krs.AcquiringMonitor
                         SafeLogEvent.TerminalQueryFailed,
                         "partial-report",
                         null);
-                    if (interactive)
-                    {
-                        ShowBalloon(
-                            "Отчёт не применён",
-                            "Терминал вернул неполный или неоднозначный отчёт.",
-                            ToolTipIcon.Warning);
-                    }
+                    ShowRefreshResult("Отчёт не применён",
+                        "Терминал вернул неполный или неоднозначный отчёт. Суммы не изменены.",
+                        interactive, true);
 
                     return;
                 }
@@ -508,13 +548,10 @@ namespace Krs.AcquiringMonitor
                 if (!ReferenceEquals(monitor, _logMonitor) ||
                     !monitor.TryApplyAuthoritativeTotals(totals, logRevision))
                 {
-                    if (interactive)
-                    {
-                        ShowBalloon(
-                            "Отчёт не применён",
-                            "Во время запроса началась банковская операция. Повторите позже.",
-                            ToolTipIcon.Warning);
-                    }
+                    _logger.Write(SafeLogEvent.TerminalQueryFailed, "log-changed", null);
+                    ShowRefreshResult("Отчёт не применён",
+                        "Во время запроса изменился журнал или началась банковская операция. Повторите позже.",
+                        interactive, true);
 
                     return;
                 }
@@ -541,13 +578,9 @@ namespace Krs.AcquiringMonitor
                     SafeLogEvent.TerminalQuerySucceeded,
                     "organizations=" + merged.Count,
                     null);
-                if (interactive)
-                {
-                    ShowBalloon(
-                        "Итоги обновлены",
-                        "Суммы получены непосредственно из текущего отчёта терминала.",
-                        ToolTipIcon.Info);
-                }
+                ShowRefreshResult("Итоги обновлены",
+                    "Суммы получены непосредственно из текущего отчёта терминала.",
+                    interactive, false);
             }
             catch (Exception exception)
             {
@@ -555,13 +588,9 @@ namespace Krs.AcquiringMonitor
                     SafeLogEvent.TerminalQueryFailed,
                     "unexpected",
                     exception);
-                if (interactive && !_exiting)
-                {
-                    ShowBalloon(
-                        "Не удалось получить итоги",
-                        "Произошла техническая ошибка. Предыдущие суммы сохранены.",
-                        ToolTipIcon.Error);
-                }
+                ShowRefreshResult("Не удалось получить итоги",
+                    "Произошла техническая ошибка. Предыдущие суммы сохранены.",
+                    interactive, true);
             }
             finally
             {
@@ -619,6 +648,12 @@ namespace Krs.AcquiringMonitor
 
         private void ShowSettings(object sender, EventArgs eventArgs)
         {
+            if (_settingsForm != null)
+            {
+                _settingsForm.Activate();
+                return;
+            }
+
             if (_refreshing)
             {
                 ShowBalloon(
@@ -628,30 +663,38 @@ namespace Krs.AcquiringMonitor
                 return;
             }
 
-            bool accepted;
-            _settingsEditing = true;
-            try
+            if (_lastFrontolBounds.Width <= 0)
             {
-                accepted = SettingsForm.ShowEditor(
-                    null,
-                    _settings,
-                    _logMonitor == null
-                        ? new int[0]
-                        : _logMonitor.CurrentSnapshot.Departments);
+                _lastFrontolBounds = Screen.FromPoint(Cursor.Position).WorkingArea;
             }
-            finally
-            {
-                _settingsEditing = false;
-            }
+            _overlay.PlaceRelativeTo(
+                _lastFrontolBounds, _settings.OverlayOffsetX, _settings.OverlayOffsetY);
+            _settingsForm = new SettingsForm(
+                _settings,
+                _logMonitor == null ? new int[0] : _logMonitor.CurrentSnapshot.Departments,
+                _overlay);
+            _settingsForm.FormClosed += SettingsClosed;
+            _overlay.Show();
+            _settingsForm.Show();
+        }
 
-            if (!accepted)
-            {
-                return;
-            }
+        private void SettingsClosed(object sender, FormClosedEventArgs eventArgs)
+        {
+            var form = (SettingsForm)sender;
+            _settingsForm = null;
+            if (_exiting) return;
 
-            SaveSettings();
-            ApplyAutoStart();
-            RestartLogMonitor();
+            _overlay.CancelDrag();
+            _overlay.SetAppearance(_settings.OverlayWidth, _settings.OverlayFontSize);
+            if (form.DialogResult == DialogResult.OK)
+            {
+                SaveOverlayPosition(this, EventArgs.Empty);
+                ApplyAutoStart();
+                RestartLogMonitor();
+            }
+            _overlay.PlaceRelativeTo(
+                _lastFrontolBounds, _settings.OverlayOffsetX, _settings.OverlayOffsetY);
+            TrackFrontol(this, EventArgs.Empty);
         }
 
         private void ShowFirstRunSettings(object sender, EventArgs eventArgs)
@@ -722,7 +765,7 @@ namespace Krs.AcquiringMonitor
 
         private void SaveOverlayPosition(object sender, EventArgs eventArgs)
         {
-            if (_lastFrontolBounds.Width <= 0)
+            if (_settingsForm != null || _lastFrontolBounds.Width <= 0)
             {
                 return;
             }
@@ -731,12 +774,19 @@ namespace Krs.AcquiringMonitor
             _settings.OverlayOffsetX = offset.X;
             _settings.OverlayOffsetY = offset.Y;
             _settings.HasCustomPosition = true;
+            _settings.OverlayWidth = _overlay.PreferredWidth;
             SaveSettings();
         }
 
         private void ResetOverlayPosition(object sender, EventArgs eventArgs)
         {
             AppSettings defaults = AppSettings.CreateDefault();
+            if (_settingsForm != null)
+            {
+                _overlay.PlaceRelativeTo(
+                    _lastFrontolBounds, defaults.OverlayOffsetX, defaults.OverlayOffsetY);
+                return;
+            }
             _settings.OverlayOffsetX = defaults.OverlayOffsetX;
             _settings.OverlayOffsetY = defaults.OverlayOffsetY;
             _settings.HasCustomPosition = false;

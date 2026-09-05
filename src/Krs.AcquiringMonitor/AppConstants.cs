@@ -8,7 +8,7 @@ namespace Krs.AcquiringMonitor
 
         public const string ApplicationName = "KRS Эквайринг Монитор";
         public const string Description =
-            "Оверлей итогов эквайринга по организациям для Frontol 6 и терминалов Сбербанка.";
+            "Настраиваемый оверлей сумм эквайринга по организациям для Frontol 6 и Сбербанк UPOS.";
         public const string Developer = "Руслан Керусов";
         public const string Publisher = "KRS";
         public const string SupportUrl = "https://pay.cloudtips.ru/p/2f23e8c9";

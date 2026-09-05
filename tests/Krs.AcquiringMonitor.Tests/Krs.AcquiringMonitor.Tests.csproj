@@ -7,6 +7,7 @@
     <AssemblyName>Krs.AcquiringMonitor.Tests</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
     <ProjectReference Include="..\..\src\Krs.AcquiringMonitor.Core\Krs.AcquiringMonitor.Core.csproj" />
     <ProjectReference Include="..\..\src\Krs.AcquiringMonitor\Krs.AcquiringMonitor.csproj" />
   </ItemGroup>

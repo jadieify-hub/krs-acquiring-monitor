@@ -7,9 +7,18 @@ namespace Krs.AcquiringMonitor.Tests
     {
         private static readonly List<string> Failures = new List<string>();
 
-        private static int Main()
+        [STAThread]
+        private static int Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
+            if (args.Length == 1 && args[0] == "--measure-idle")
+            {
+                return RuntimeDiagnostics.MeasureIdle();
+            }
+            if (args.Length == 2 && args[0] == "--render-preview")
+            {
+                return RuntimeDiagnostics.RenderPreview(args[1]);
+            }
             Run("успешная покупка отдела 1", BankLogParserTests.SuccessfulPurchaseDepartment1);
             Run("успешная покупка отдела 2", BankLogParserTests.SuccessfulPurchaseDepartment2);
             Run("возврат уменьшает итог", BankLogParserTests.SuccessfulRefundSubtracts);
@@ -19,6 +28,7 @@ namespace Krs.AcquiringMonitor.Tests
             Run("две организации ждут второе закрытие", BankLogParserTests.TwoDepartmentsWaitForSecondClose);
             Run("отдел без операций всё равно ждёт закрытия", BankLogParserTests.ConfiguredSecondDepartmentWithoutTransactionsStillNeedsSecondClose);
             Run("неполное закрытие сохраняет суммы", BankLogParserTests.IncompleteCloseKeepsTotalsStale);
+            Run("статистика не завершает прерванное закрытие", BankLogParserTests.StatisticsDoesNotCompleteInterruptedClose);
             Run("ручной снимок становится новой базой", BankLogParserTests.AuthoritativeSnapshotBecomesNewBaseline);
             Run("полный снимок добавляет второй отдел", BankLogParserTests.AuthoritativeSnapshotCanAddSecondDepartment);
             Run("сверка между закрытиями отклоняется", BankLogParserTests.AuthoritativeSnapshotIsRejectedBetweenDepartmentCloses);
@@ -41,6 +51,7 @@ namespace Krs.AcquiringMonitor.Tests
             Run("перезапуск восстанавливает те же итоги", MonthRolloverTests.RestartRebuildsSameTotals);
             Run("недоступная папка возвращает устаревшее значение", MonthRolloverTests.MissingDirectoryUsesStaleFallback);
             Run("настройки сохраняются в профиле приложения", MonthRolloverTests.SettingsRoundTrip);
+            Run("старые настройки сохраняют привычный размер", MonthRolloverTests.OldSettingsKeepDefaultAppearance);
             Run("банковское имя отделено от подписи", MonthRolloverTests.KeepsBankIdentitySeparateFromDisplayName);
             Run("нестабильное состояние не затирает контрольную точку", MonthRolloverTests.RejectsUnstableRuntimeCheckpoint);
             Run("устаревший ручной снимок не перезаписывает оплату", MonthRolloverTests.RejectsManualSnapshotAfterLogChanged);
@@ -64,6 +75,8 @@ namespace Krs.AcquiringMonitor.Tests
             Run("невалидные манифесты обновления отклоняются", UpdateManifestTests.RejectsInvalidAndNonNewerManifests);
             Run("манифест содержит ровно два поля", UpdateManifestTests.RequiresExactTwoFieldObject);
             Run("SHA-256 установщика проверяется", UpdateManifestTests.VerifiesInstallerSha256);
+            Run("изменённый ожидающий установщик не запускается", UpdateManifestTests.RejectsInstallerChangedWhileWaiting);
+            Run("обновления повторяются и ждут безопасной паузы", UpdateScheduleTests.RepeatsChecksAndWaitsForIdle);
             Run("сумма оверлея имеет две копейки", OverlayPresentationTests.FormatsCurrencyWithTwoDecimals);
             Run("оверлей показывает обнаруженные организации", OverlayPresentationTests.BuildsRowsForDiscoveredDepartments);
             Run("неизвестная сумма показывается прочерком", OverlayPresentationTests.UnknownAmountUsesDash);
@@ -71,6 +84,12 @@ namespace Krs.AcquiringMonitor.Tests
             Run("оверлей привязан к самой большой форме Frontol", OverlayPresentationTests.UsesLargestVisibleFrontolSurfaceForPlacement);
             Run("белый текст не имеет цветной каймы", OverlayPresentationTests.RendersWhiteTextWithoutColorKeyFringe);
             Run("названия организаций отображаются обычным шрифтом", OverlayPresentationTests.UsesRegularOrganizationFont);
+            Run("полная сумма не обрезается и не перекрывает край", OverlayPresentationTests.AmountDoesNotOverlapResizeGrip);
+            Run("ошибка сверки остаётся доступной после запроса", OverlayPresentationTests.RefreshFailureRemainsVisible);
+            Run("ширина меняется без изменения шрифта", OverlayAppearanceTests.WidthChangesWithoutChangingFont);
+            Run("обновление только двойным щелчком по сумме", OverlayAppearanceTests.RefreshesOnlyOnAmountDoubleClick);
+            Run("отмена прекращает незаконченный жест без сохранения", OverlayAppearanceTests.CancelStopsUnfinishedDrag);
+            Run("предпросмотр не сохраняет настройки до подтверждения", OverlayAppearanceTests.PreviewDoesNotChangeSettingsUntilSaved);
             Run("форма показывает утверждённую страницу CloudTips", SupportConfigurationTests.DisplaysApprovedCloudTipsPage);
 
             if (Failures.Count == 0)

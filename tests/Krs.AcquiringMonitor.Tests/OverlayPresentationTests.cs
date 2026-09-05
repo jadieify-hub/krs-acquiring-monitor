@@ -176,9 +176,6 @@ namespace Krs.AcquiringMonitor.Tests
                 TestAssert.Equal("Segoe UI", font.Name);
                 TestAssert.Equal(FontStyle.Regular, font.Style);
                 TestAssert.Equal(470, (int)formType.GetProperty("Width").GetValue(form, null));
-                TestAssert.Equal(268, nameWidth);
-                TestAssert.Equal(276, amountLeft);
-                TestAssert.Equal(160, amountWidth);
                 TestAssert.True(
                     nameLeft + nameWidth <= amountLeft,
                     "Название и сумма не должны пересекаться.");
@@ -186,6 +183,78 @@ namespace Krs.AcquiringMonitor.Tests
             finally
             {
                 ((IDisposable)form).Dispose();
+            }
+        }
+
+        public static void AmountDoesNotOverlapResizeGrip()
+        {
+            Type formType = typeof(OverlayPresentation).Assembly.GetType(
+                "Krs.AcquiringMonitor.UI.OverlayForm", true);
+            using (var form = (System.Windows.Forms.Form)Activator.CreateInstance(formType))
+            {
+                formType.GetMethod("SetRows").Invoke(form, new object[]
+                {
+                    OverlayPresentation.BuildRows(
+                        BankLogSnapshot.FromTotals(
+                            new Dictionary<int, long> { { 1, -999999999L } }, false),
+                        new Dictionary<int, string> { { 1, "ИП Иванов" } })
+                });
+                var amount = form.Controls[1];
+                var grip = form.Controls[form.Controls.Count - 1];
+                foreach (float dpi in new[] { 96f, 144f, 192f })
+                using (var bitmap = new Bitmap(1200, 240))
+                {
+                    bitmap.SetResolution(dpi, dpi);
+                    using (Graphics graphics = Graphics.FromImage(bitmap))
+                    {
+                        formType.GetMethod("LayoutRows",
+                            BindingFlags.Instance | BindingFlags.NonPublic,
+                            null, new[] { typeof(Graphics) }, null)
+                            .Invoke(form, new object[] { graphics });
+                        graphics.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+                        TestAssert.True(
+                            graphics.MeasureString(amount.Text, amount.Font).Width <= amount.Width,
+                            "Полная сумма с копейками и ₽ должна помещаться при DPI=" + dpi);
+                        TestAssert.True(amount.Font.GetHeight(graphics) <= amount.Height,
+                            "Сумма должна помещаться по высоте при DPI=" + dpi);
+                        TestAssert.True(amount.Right < grip.Left,
+                            "Сумма не должна залезать на край изменения ширины.");
+                    }
+                }
+            }
+        }
+
+        public static void RefreshFailureRemainsVisible()
+        {
+            Type formType = typeof(OverlayPresentation).Assembly.GetType(
+                "Krs.AcquiringMonitor.UI.OverlayForm", true);
+            using (var form = (System.Windows.Forms.Form)Activator.CreateInstance(formType))
+            {
+                var rows = new List<OverlayRow>
+                {
+                    new OverlayRow(1, "ИП Иванов", "1 475,00 ₽", false),
+                    new OverlayRow(2, "ООО Пример", "237,00 ₽", false)
+                };
+                formType.GetMethod("SetRows").Invoke(form, new object[] { rows });
+                formType.GetMethod("SetRefreshing").Invoke(form, new object[] { true });
+                formType.GetMethod("SetRefreshStatus").Invoke(form, new object[] { "report-format", true });
+                formType.GetMethod("SetRefreshing").Invoke(form, new object[] { false });
+                formType.GetMethod("SetRows").Invoke(form, new object[] { rows });
+                foreach (int index in new[] { 1, 3 })
+                {
+                    TestAssert.True((form.Controls[index].AccessibleDescription ?? "").Contains("report-format"),
+                        "Причина ошибки доступна на каждой сумме после обновления строк.");
+                    TestAssert.True(form.Controls[index].Enabled, "После ошибки можно повторить запрос.");
+                    TestAssert.True(form.Controls[index].ForeColor != Color.White,
+                        "Ошибка видна на суммах, даже если трей скрыт.");
+                }
+                TestAssert.Equal("1 475,00 ₽", form.Controls[1].Text);
+                TestAssert.Equal("237,00 ₽", form.Controls[3].Text);
+                TestAssert.Equal(Color.White, form.Controls[0].ForeColor);
+                formType.GetMethod("SetRefreshStatus").Invoke(form, new object[] { "", false });
+                TestAssert.Equal(Color.White, form.Controls[1].ForeColor);
+                formType.GetMethod("SetDataStale").Invoke(form, new object[] { true });
+                TestAssert.True(form.Controls[1].ForeColor != Color.White, "Устаревшие данные отмечены цветом.");
             }
         }
     }
