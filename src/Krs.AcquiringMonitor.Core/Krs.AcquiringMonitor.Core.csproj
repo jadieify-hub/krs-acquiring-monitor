@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Krs.AcquiringMonitor.Core</RootNamespace>
+    <AssemblyName>Krs.AcquiringMonitor.Core</AssemblyName>
+  </PropertyGroup>
+</Project>

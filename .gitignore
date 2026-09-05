@@ -1,0 +1,24 @@
+# Боевые файлы банковского терминала и временный визуальный прототип
+SC552/
+.superpowers/
+
+# Локальные инструменты анализа
+.tools/
+
+# Visual Studio / MSBuild
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Пользовательские данные и журналы
+artifacts/
+logs/
+*.log
+settings.json
+
+# Пакеты и сборочные каталоги
+packages/
+TestResults/
+

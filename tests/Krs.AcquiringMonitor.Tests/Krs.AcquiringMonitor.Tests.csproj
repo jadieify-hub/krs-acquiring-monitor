@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <RootNamespace>Krs.AcquiringMonitor.Tests</RootNamespace>
+    <AssemblyName>Krs.AcquiringMonitor.Tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Krs.AcquiringMonitor.Core\Krs.AcquiringMonitor.Core.csproj" />
+    <ProjectReference Include="..\..\src\Krs.AcquiringMonitor\Krs.AcquiringMonitor.csproj" />
+  </ItemGroup>
+</Project>

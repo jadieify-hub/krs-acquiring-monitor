@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <RootNamespace>Krs.AcquiringMonitor.TerminalQuery</RootNamespace>
+    <AssemblyName>Krs.AcquiringMonitor.TerminalQuery</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Krs.AcquiringMonitor.Core\Krs.AcquiringMonitor.Core.csproj" />
+  </ItemGroup>
+</Project>
