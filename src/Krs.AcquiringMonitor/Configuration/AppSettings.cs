@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Runtime.Serialization;
 
@@ -14,6 +15,11 @@ namespace Krs.AcquiringMonitor.Configuration
         public const float DefaultOverlayFontSize = 15.5f;
         public const float MinimumOverlayFontSize = 8f;
         public const float MaximumOverlayFontSize = 32f;
+        public const string DefaultOverlayFontFamily = "Segoe UI";
+        public static readonly IReadOnlyList<string> OverlayFontFamilies =
+            Array.AsReadOnly(new[] { DefaultOverlayFontFamily, "Arial", "Tahoma" });
+        public static readonly Color DefaultOverlayTextColor = Color.White;
+        public static readonly Color DefaultOverlayAttentionColor = Color.FromArgb(255, 190, 90);
 
         public AppSettings()
         {
@@ -45,6 +51,33 @@ namespace Krs.AcquiringMonitor.Configuration
         [DataMember(Order = 8)]
         public float OverlayFontSize { get; set; }
 
+        [DataMember(Order = 9)]
+        public int OverlayTextColorArgb { get; set; }
+
+        [DataMember(Order = 10)]
+        public int OverlayAttentionColorArgb { get; set; }
+
+        [DataMember(Order = 11)]
+        public string OverlayFontFamily { get; set; }
+
+        [DataMember(Order = 12)]
+        public bool OverlayNamesBold { get; set; }
+
+        [DataMember(Order = 13)]
+        public bool? OverlayAmountsBold { get; set; }
+
+        public static string NormalizeOverlayFontFamily(string family)
+        {
+            return OverlayFontFamilies.FirstOrDefault(value =>
+                string.Equals(value, family, StringComparison.OrdinalIgnoreCase)) ?? DefaultOverlayFontFamily;
+        }
+
+        public static Color NormalizeOverlayColor(int argb, Color fallback)
+        {
+            Color color = Color.FromArgb(argb);
+            return color.A == 255 ? color : fallback;
+        }
+
         public static int NormalizeOverlayWidth(int value)
         {
             return value <= 0 ? DefaultOverlayWidth :
@@ -67,6 +100,10 @@ namespace Krs.AcquiringMonitor.Configuration
                 HasCustomPosition = false,
                 OverlayWidth = DefaultOverlayWidth,
                 OverlayFontSize = DefaultOverlayFontSize,
+                OverlayFontFamily = DefaultOverlayFontFamily,
+                OverlayAmountsBold = true,
+                OverlayTextColorArgb = DefaultOverlayTextColor.ToArgb(),
+                OverlayAttentionColorArgb = DefaultOverlayAttentionColor.ToArgb(),
                 AutoStart = true
             };
         }

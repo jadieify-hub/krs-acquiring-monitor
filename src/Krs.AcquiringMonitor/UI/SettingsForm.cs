@@ -15,6 +15,11 @@ namespace Krs.AcquiringMonitor.UI
         private readonly OverlayForm _preview;
         private readonly NumericUpDown _widthEditor;
         private readonly NumericUpDown _fontSizeEditor;
+        private readonly ComboBox _fontFamilyEditor;
+        private readonly CheckBox _namesBoldEditor;
+        private readonly CheckBox _amountsBoldEditor;
+        private readonly Panel _textColorSwatch;
+        private readonly Panel _attentionColorSwatch;
         private readonly Dictionary<int, TextBox> _nameEditors =
             new Dictionary<int, TextBox>();
         private readonly Dictionary<int, string> _originalNames =
@@ -34,7 +39,7 @@ namespace Krs.AcquiringMonitor.UI
             MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(610, 410);
+            ClientSize = new Size(610, 500);
 
             var directoryLabel = new Label
             {
@@ -171,21 +176,49 @@ namespace Krs.AcquiringMonitor.UI
                 Value = (decimal)AppSettings.NormalizeOverlayFontSize(settings.OverlayFontSize)
             };
             Controls.Add(_fontSizeEditor);
+            Controls.Add(new Label { Text = "Шрифт:", Left = 18, Top = 309, Width = 65, Height = 24 });
+            _fontFamilyEditor = new ComboBox
+            {
+                Name = "OverlayFontFamily", AccessibleName = "Шрифт оверлея",
+                Left = 85, Top = 305, Width = 170, DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            _fontFamilyEditor.Items.AddRange(AppSettings.OverlayFontFamilies.Cast<object>().ToArray());
+            _fontFamilyEditor.SelectedItem = AppSettings.NormalizeOverlayFontFamily(settings.OverlayFontFamily);
+            Controls.Add(_fontFamilyEditor);
+            _namesBoldEditor = new CheckBox
+            {
+                Name = "OverlayNamesBold", Text = "Жирные названия",
+                Left = 296, Top = 307, Width = 165, Checked = settings.OverlayNamesBold
+            };
+            Controls.Add(_namesBoldEditor);
+            _amountsBoldEditor = new CheckBox
+            {
+                Name = "OverlayAmountsBold", Text = "Жирные суммы",
+                Left = 468, Top = 307, Width = 124, Checked = settings.OverlayAmountsBold ?? true
+            };
+            Controls.Add(_amountsBoldEditor);
+            _textColorSwatch = AddColorSelector("OverlayTextColor", "Цвет текста…", 18,
+                AppSettings.NormalizeOverlayColor(settings.OverlayTextColorArgb, AppSettings.DefaultOverlayTextColor));
+            _attentionColorSwatch = AddColorSelector("OverlayAttentionColor", "Цвет предупреждений…", 296,
+                AppSettings.NormalizeOverlayColor(settings.OverlayAttentionColorArgb, AppSettings.DefaultOverlayAttentionColor));
             Controls.Add(new Label
             {
-                Text = "Оверлей виден для настройки. Перетаскивайте название или правый край.\r\n«Отмена» вернёт прежние размеры и положение.",
-                Left = 18, Top = 305, Width = 574, Height = 40,
+                Text = "Шрифт и цвета видны сразу. Перетаскивайте название или правый край.\r\n«Отмена» вернёт прежний вид и положение.",
+                Left = 18, Top = 395, Width = 574, Height = 40,
                 ForeColor = Color.DimGray
             });
             _widthEditor.ValueChanged += PreviewAppearance;
             _fontSizeEditor.ValueChanged += PreviewAppearance;
+            _fontFamilyEditor.SelectedIndexChanged += PreviewAppearance;
+            _namesBoldEditor.CheckedChanged += PreviewAppearance;
+            _amountsBoldEditor.CheckedChanged += PreviewAppearance;
             _preview.PositionCommitted += PreviewPositionCommitted;
 
             _autoStartCheckBox = new CheckBox
             {
                 Text = "Запускать вместе с Windows",
                 Left = 18,
-                Top = 360,
+                Top = 450,
                 Width = 260,
                 Checked = settings.AutoStart
             };
@@ -195,7 +228,7 @@ namespace Krs.AcquiringMonitor.UI
             {
                 Text = "Сохранить",
                 Left = 392,
-                Top = 355,
+                Top = 445,
                 Width = 96,
                 Height = 32,
                 DialogResult = DialogResult.OK
@@ -207,7 +240,7 @@ namespace Krs.AcquiringMonitor.UI
             {
                 Text = "Отмена",
                 Left = 496,
-                Top = 355,
+                Top = 445,
                 Width = 96,
                 Height = 32,
                 DialogResult = DialogResult.Cancel
@@ -224,12 +257,59 @@ namespace Krs.AcquiringMonitor.UI
             if (disposing)
             {
                 _preview.PositionCommitted -= PreviewPositionCommitted;
+                if (!_preview.IsDisposed)
+                {
+                    _preview.SetTypography(_settings.OverlayFontFamily, _settings.OverlayNamesBold,
+                        _settings.OverlayAmountsBold ?? true);
+                    _preview.SetColors(_settings.OverlayTextColorArgb, _settings.OverlayAttentionColorArgb);
+                }
             }
             base.Dispose(disposing);
         }
 
+        private Panel AddColorSelector(string name, string title, int left, Color color)
+        {
+            var swatch = new Panel
+            {
+                Name = name,
+                AccessibleName = title.TrimEnd('…'),
+                Left = left + 210, Top = 348, Width = 34, Height = 28,
+                BackColor = color,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            var button = new Button
+            {
+                Text = title,
+                AccessibleName = title.TrimEnd('…'),
+                Left = left, Top = 345, Width = 200, Height = 32
+            };
+            button.Click += delegate { ChooseColor(swatch); };
+            swatch.BackColorChanged += PreviewColors;
+            Controls.Add(button);
+            Controls.Add(swatch);
+            return swatch;
+        }
+
+        private void ChooseColor(Panel swatch)
+        {
+            PreviewColors(swatch, EventArgs.Empty);
+            using (var dialog = new ColorDialog { Color = swatch.BackColor, FullOpen = true, AnyColor = true })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                swatch.BackColor = dialog.Color;
+            }
+        }
+
+        private void PreviewColors(object sender, EventArgs eventArgs)
+        {
+            _preview.SetColors(_textColorSwatch.BackColor.ToArgb(), _attentionColorSwatch.BackColor.ToArgb(),
+                ReferenceEquals(sender, _attentionColorSwatch));
+        }
+
         private void PreviewAppearance(object sender, EventArgs eventArgs)
         {
+            _preview.SetTypography((string)_fontFamilyEditor.SelectedItem,
+                _namesBoldEditor.Checked, _amountsBoldEditor.Checked);
             _preview.SetAppearance((int)_widthEditor.Value, (float)_fontSizeEditor.Value);
         }
 
@@ -260,6 +340,11 @@ namespace Krs.AcquiringMonitor.UI
             _settings.AutoStart = _autoStartCheckBox.Checked;
             _settings.OverlayWidth = (int)_widthEditor.Value;
             _settings.OverlayFontSize = (float)_fontSizeEditor.Value;
+            _settings.OverlayFontFamily = (string)_fontFamilyEditor.SelectedItem;
+            _settings.OverlayNamesBold = _namesBoldEditor.Checked;
+            _settings.OverlayAmountsBold = _amountsBoldEditor.Checked;
+            _settings.OverlayTextColorArgb = _textColorSwatch.BackColor.ToArgb();
+            _settings.OverlayAttentionColorArgb = _attentionColorSwatch.BackColor.ToArgb();
 
             foreach (KeyValuePair<int, TextBox> item in _nameEditors)
             {

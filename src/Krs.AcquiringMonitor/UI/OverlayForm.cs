@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Drawing.Text;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Krs.AcquiringMonitor.Configuration;
 
@@ -20,7 +23,7 @@ namespace Krs.AcquiringMonitor.UI
             TextRenderingHint previousHint = graphics.TextRenderingHint;
             try
             {
-                graphics.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+                graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                 using (var brush = new SolidBrush(color))
                 using (var format = new StringFormat())
                 {
@@ -57,7 +60,10 @@ namespace Krs.AcquiringMonitor.UI
     {
         private const int ExtendedStyleToolWindow = 0x00000080;
         private const int ExtendedStyleNoActivate = 0x08000000;
-        private static readonly Color AttentionColor = Color.FromArgb(255, 190, 90);
+        private const int ExtendedStyleLayered = 0x00080000;
+        private Color _textColor = AppSettings.DefaultOverlayTextColor;
+        private Color _attentionColor = AppSettings.DefaultOverlayAttentionColor;
+        private bool _previewAttentionColor;
         private readonly Label[] _nameControls;
         private readonly Label[] _amountControls;
         private readonly Label _resizeGrip;
@@ -74,23 +80,26 @@ namespace Krs.AcquiringMonitor.UI
         private bool _refreshing;
         private int _preferredWidth = AppSettings.DefaultOverlayWidth;
         private float _fontSize = AppSettings.DefaultOverlayFontSize;
+        private string _fontFamily = AppSettings.DefaultOverlayFontFamily;
+        private bool _namesBold;
+        private bool _amountsBold = true;
         private float _layoutScale = 1f;
         private bool _resizing;
         private int _resizeWidthOrigin;
+        private bool _renderQueued;
 
         public OverlayForm()
         {
             // Measure and arrange with the same DPI as DrawString; do not scale twice.
             AutoScaleMode = AutoScaleMode.None;
-            BackColor = Color.Fuchsia;
-            TransparencyKey = Color.Fuchsia;
+            BackColor = Color.Black;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
 
-            var nameFont = new Font("Segoe UI", 15.5f, FontStyle.Regular);
-            var amountFont = new Font("Segoe UI Semibold", 16.5f, FontStyle.Regular);
+            var nameFont = new Font(_fontFamily, _fontSize, FontStyle.Regular);
+            var amountFont = new Font(_fontFamily, _fontSize + 1f, FontStyle.Bold);
             _nameControls = new Label[2];
             _amountControls = new Label[2];
 
@@ -100,7 +109,7 @@ namespace Krs.AcquiringMonitor.UI
                 {
                     AutoSize = false,
                     BackColor = Color.Transparent,
-                    ForeColor = Color.White,
+                    ForeColor = _textColor,
                     Font = nameFont,
                     Cursor = Cursors.SizeAll,
                     TextAlign = ContentAlignment.MiddleLeft
@@ -115,7 +124,7 @@ namespace Krs.AcquiringMonitor.UI
                 {
                     AutoSize = false,
                     BackColor = Color.Transparent,
-                    ForeColor = Color.White,
+                    ForeColor = _textColor,
                     Font = amountFont,
                     Cursor = Cursors.Hand,
                     TextAlign = ContentAlignment.MiddleLeft
@@ -129,7 +138,7 @@ namespace Krs.AcquiringMonitor.UI
             {
                 Text = "⋮",
                 Font = new Font("Segoe UI Symbol", 12f, FontStyle.Regular),
-                ForeColor = Color.White,
+                ForeColor = _textColor,
                 BackColor = Color.Transparent,
                 Cursor = Cursors.SizeWE,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -141,6 +150,15 @@ namespace Krs.AcquiringMonitor.UI
             _resizeGrip.MouseUp += EndResize;
             Controls.Add(_resizeGrip);
             _toolTip.SetToolTip(_resizeGrip, "Потяните край, чтобы изменить ширину. Шрифт не меняется.");
+            foreach (Control part in Controls)
+            {
+                part.TextChanged += QueueRender;
+                part.FontChanged += QueueRender;
+                part.ForeColorChanged += QueueRender;
+                part.SizeChanged += QueueRender;
+                part.LocationChanged += QueueRender;
+                part.VisibleChanged += QueueRender;
+            }
             LayoutRows();
             UpdateRefreshState();
         }
@@ -173,20 +191,50 @@ namespace Krs.AcquiringMonitor.UI
             fontSize = AppSettings.NormalizeOverlayFontSize(fontSize);
             if (_fontSize != fontSize)
             {
-                Font oldNameFont = _nameControls[0].Font;
-                Font oldAmountFont = _amountControls[0].Font;
-                var nameFont = new Font("Segoe UI", fontSize, FontStyle.Regular);
-                var amountFont = new Font("Segoe UI Semibold", fontSize + 1f, FontStyle.Regular);
-                for (int i = 0; i < 2; i++)
-                {
-                    _nameControls[i].Font = nameFont;
-                    _amountControls[i].Font = amountFont;
-                }
-                oldNameFont.Dispose();
-                oldAmountFont.Dispose();
                 _fontSize = fontSize;
+                ApplyFonts();
             }
             LayoutRows();
+        }
+
+        public void SetTypography(string family, bool namesBold, bool amountsBold)
+        {
+            family = AppSettings.NormalizeOverlayFontFamily(family);
+            if (_fontFamily == family && _namesBold == namesBold && _amountsBold == amountsBold) return;
+            _fontFamily = family;
+            _namesBold = namesBold;
+            _amountsBold = amountsBold;
+            ApplyFonts();
+            LayoutRows();
+        }
+
+        private void ApplyFonts()
+        {
+            ApplyFont(_nameControls, new Font(_fontFamily, _fontSize, _namesBold ? FontStyle.Bold : FontStyle.Regular));
+            ApplyFont(_amountControls, new Font(_fontFamily, _fontSize + 1f, _amountsBold ? FontStyle.Bold : FontStyle.Regular));
+        }
+
+        private static void ApplyFont(Label[] controls, Font font)
+        {
+            Font previous = controls[0].Font;
+            // WinForms keeps the previous instance when the assigned font is value-equal.
+            if (previous.Equals(font))
+            {
+                font.Dispose();
+                return;
+            }
+            foreach (Label control in controls) control.Font = font;
+            previous.Dispose();
+        }
+
+        public void SetColors(int textArgb, int attentionArgb, bool previewAttention = false)
+        {
+            _textColor = AppSettings.NormalizeOverlayColor(textArgb, AppSettings.DefaultOverlayTextColor);
+            _attentionColor = AppSettings.NormalizeOverlayColor(attentionArgb, AppSettings.DefaultOverlayAttentionColor);
+            _previewAttentionColor = previewAttention;
+            foreach (Label name in _nameControls) name.ForeColor = _textColor;
+            _resizeGrip.ForeColor = _textColor;
+            UpdateRefreshState();
         }
 
         public Point RelativeOffset
@@ -211,7 +259,8 @@ namespace Krs.AcquiringMonitor.UI
                 CreateParams parameters = base.CreateParams;
                 parameters.ExStyle |=
                     ExtendedStyleToolWindow |
-                    ExtendedStyleNoActivate;
+                    ExtendedStyleNoActivate |
+                    ExtendedStyleLayered;
                 return parameters;
             }
         }
@@ -228,12 +277,13 @@ namespace Krs.AcquiringMonitor.UI
                 _amountControls[index].Visible = visible;
                 if (!visible)
                 {
+                    _nameControls[index].Text = string.Empty;
+                    _amountControls[index].Text = string.Empty;
                     continue;
                 }
 
                 OverlayRow row = rows[index];
                 _nameControls[index].Text = row.OrganizationName;
-                _nameControls[index].ForeColor = Color.White;
                 _amountControls[index].Text = row.AmountText;
                 dataStale = dataStale || row.IsStale;
             }
@@ -255,7 +305,7 @@ namespace Krs.AcquiringMonitor.UI
             float scale = graphics.DpiX / 96f;
             _layoutScale = scale;
             Func<int, int> pixels = value => (int)Math.Ceiling(value * scale);
-            graphics.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             int amountWidth = 0;
             for (int index = 0; index < _rowCount; index++)
             {
@@ -280,6 +330,115 @@ namespace Krs.AcquiringMonitor.UI
             _resizeGrip.Bounds = new Rectangle(
                 _amountControls[0].Right + pixels(2), 0, pixels(12), Height);
             Width = _resizeGrip.Right + pixels(2);
+        }
+
+        internal Bitmap RenderBitmap()
+        {
+            var bitmap = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb);
+            bitmap.SetResolution(96f * _layoutScale, 96f * _layoutScale);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.Transparent);
+                for (int index = 0; index < _rowCount; index++)
+                {
+                    DrawPart(graphics, _nameControls[index]);
+                    DrawPart(graphics, _amountControls[index]);
+                }
+                DrawPart(graphics, _resizeGrip);
+            }
+            return bitmap;
+        }
+
+        private static void DrawPart(Graphics graphics, Label part)
+        {
+            OverlayTextLabel.DrawText(graphics, part.Text, part.Font, part.ForeColor, part.Bounds, part.TextAlign);
+        }
+
+        private void QueueRender(object sender, EventArgs eventArgs)
+        {
+            if (_renderQueued || !IsHandleCreated || !Visible || Disposing || IsDisposed) return;
+            _renderQueued = true;
+            BeginInvoke(new Action(() =>
+            {
+                _renderQueued = false;
+                if (!Disposing && !IsDisposed && Visible) RenderSurface();
+            }));
+        }
+
+        protected override void OnVisibleChanged(EventArgs eventArgs)
+        {
+            base.OnVisibleChanged(eventArgs);
+            QueueRender(this, eventArgs);
+        }
+
+        protected override void OnHandleDestroyed(EventArgs eventArgs)
+        {
+            _renderQueued = false;
+            base.OnHandleDestroyed(eventArgs);
+        }
+
+        private void RenderSurface()
+        {
+            // UpdateLayeredWindow consumes premultiplied alpha. No color key or background sampling.
+            using (Bitmap bitmap = RenderBitmap())
+            {
+                IntPtr dc = NativeMethods.CreateCompatibleDC(IntPtr.Zero);
+                if (dc == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+                IntPtr image = IntPtr.Zero;
+                IntPtr previous = IntPtr.Zero;
+                try
+                {
+                    image = bitmap.GetHbitmap(Color.FromArgb(0));
+                    previous = NativeMethods.SelectObject(dc, image);
+                    if (previous == IntPtr.Zero || previous == new IntPtr(-1))
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                    Point destination = Location;
+                    Point source = Point.Empty;
+                    Size size = bitmap.Size;
+                    var blend = new NativeMethods.BlendFunction { SourceConstantAlpha = 255, AlphaFormat = 1 };
+                    if (!NativeMethods.UpdateLayeredWindow(Handle, IntPtr.Zero, ref destination, ref size,
+                        dc, ref source, 0, ref blend, 2))
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                finally
+                {
+                    if (previous != IntPtr.Zero && previous != new IntPtr(-1)) NativeMethods.SelectObject(dc, previous);
+                    if (image != IntPtr.Zero) NativeMethods.DeleteObject(image);
+                    NativeMethods.DeleteDC(dc);
+                }
+            }
+        }
+
+        private static class NativeMethods
+        {
+            [StructLayout(LayoutKind.Sequential, Pack = 1)]
+            internal struct BlendFunction
+            {
+                internal byte BlendOp;
+                internal byte BlendFlags;
+                internal byte SourceConstantAlpha;
+                internal byte AlphaFormat;
+            }
+
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool UpdateLayeredWindow(IntPtr window, IntPtr destinationDc,
+                ref Point destination, ref Size size, IntPtr sourceDc, ref Point source,
+                uint colorKey, ref BlendFunction blend, uint flags);
+
+            [DllImport("gdi32.dll", SetLastError = true)]
+            internal static extern IntPtr CreateCompatibleDC(IntPtr dc);
+
+            [DllImport("gdi32.dll", SetLastError = true)]
+            internal static extern IntPtr SelectObject(IntPtr dc, IntPtr image);
+
+            [DllImport("gdi32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool DeleteObject(IntPtr image);
+
+            [DllImport("gdi32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool DeleteDC(IntPtr dc);
         }
 
         protected override void OnDpiChanged(DpiChangedEventArgs eventArgs)
@@ -353,8 +512,8 @@ namespace Krs.AcquiringMonitor.UI
             foreach (Label amount in _amountControls)
             {
                 amount.Cursor = _refreshing ? Cursors.WaitCursor : Cursors.Hand;
-                amount.ForeColor = _dataStale || _refreshDeferred || _refreshFailed
-                    ? AttentionColor : Color.White;
+                amount.ForeColor = _previewAttentionColor || _dataStale || _refreshDeferred || _refreshFailed
+                    ? _attentionColor : _textColor;
                 amount.AccessibleDescription = hint;
                 _toolTip.SetToolTip(amount, hint);
             }

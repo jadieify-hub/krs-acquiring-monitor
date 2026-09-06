@@ -90,53 +90,40 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.Equal(new Rectangle(0, 28, 1920, 1012), selected.Bounds);
         }
 
-        public static void RendersWhiteTextWithoutColorKeyFringe()
+        public static void RendersSmoothTextOnTransparentSurface()
         {
-            Type labelType = typeof(OverlayPresentation).Assembly.GetType(
-                "Krs.AcquiringMonitor.UI.OverlayTextLabel",
-                false);
-            TestAssert.True(
-                labelType != null,
-                "Оверлей должен использовать рендер текста без сглаживания по цветному ключу.");
-            MethodInfo drawText = labelType.GetMethod(
-                "DrawText",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            TestAssert.True(drawText != null, "Не найден метод безопасной отрисовки текста.");
-
-            using (var bitmap = new Bitmap(240, 40))
-            using (Graphics graphics = Graphics.FromImage(bitmap))
-            using (var font = new Font("Segoe UI Semibold", 16f, FontStyle.Regular))
+            using (var form = OverlayAppearanceTests.CreateOverlay())
             {
-                graphics.Clear(Color.Fuchsia);
-                graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-                drawText.Invoke(
-                    null,
-                    new object[]
-                    {
-                        graphics,
-                        "Организация",
-                        font,
-                        Color.White,
-                        new Rectangle(0, 0, bitmap.Width, bitmap.Height),
-                        ContentAlignment.MiddleLeft
-                    });
-
-                bool hasWhitePixel = false;
-                for (int y = 0; y < bitmap.Height; y++)
+                MethodInfo render = form.GetType().GetMethod("RenderBitmap", BindingFlags.Instance | BindingFlags.NonPublic);
+                TestAssert.True(render != null, "Оверлей должен рисовать сглаженную поверхность с альфа-каналом.");
+                foreach (Color color in new[] { Color.White, Color.Black, Color.Fuchsia })
                 {
-                    for (int x = 0; x < bitmap.Width; x++)
+                    form.GetType().GetMethod("SetColors").Invoke(form,
+                        new object[] { color.ToArgb(), Color.DarkRed.ToArgb(), false });
+                    using (var bitmap = (Bitmap)render.Invoke(form, null))
                     {
-                        Color pixel = bitmap.GetPixel(x, y);
-                        bool isBackground = pixel.ToArgb() == Color.Fuchsia.ToArgb();
-                        bool isText = pixel.ToArgb() == Color.White.ToArgb();
-                        hasWhitePixel = hasWhitePixel || isText;
-                        TestAssert.True(
-                            isBackground || isText,
-                            "Белый текст не должен содержать цветные полупрозрачные пиксели.");
+                        TestAssert.Equal(0, (int)bitmap.GetPixel(0, 0).A);
+                        int smoothPixels = 0;
+                        int opaquePixels = 0;
+                        for (int y = 0; y < bitmap.Height; y++)
+                        for (int x = 0; x < bitmap.Width; x++)
+                        {
+                            Color pixel = bitmap.GetPixel(x, y);
+                            if (pixel.A == 0) continue;
+                            if (pixel.A < 255) smoothPixels++;
+                            else opaquePixels++;
+                            // GetPixel unpremultiplies with one-level channel rounding (255 can read as 254).
+                            TestAssert.True(Math.Abs(pixel.R - color.R) <= 1 &&
+                                Math.Abs(pixel.G - color.G) <= 1 && Math.Abs(pixel.B - color.B) <= 1,
+                                "Края текста имеют выбранный цвет: " + color + ", получен " + pixel + ".");
+                        }
+                        TestAssert.True(smoothPixels > 0, "Нужны полупрозрачные сглаженные края букв.");
+                        TestAssert.True(opaquePixels > 0, "Основная часть букв должна оставаться непрозрачной.");
                     }
                 }
-
-                TestAssert.True(hasWhitePixel, "Текст должен быть отрисован.");
+                // Present the real surface to our own hidden HWND: no cash register or screen capture.
+                form.GetType().GetMethod("RenderSurface", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(form, null);
             }
         }
 
@@ -211,7 +198,7 @@ namespace Krs.AcquiringMonitor.Tests
                             BindingFlags.Instance | BindingFlags.NonPublic,
                             null, new[] { typeof(Graphics) }, null)
                             .Invoke(form, new object[] { graphics });
-                        graphics.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+                        graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                         TestAssert.True(
                             graphics.MeasureString(amount.Text, amount.Font).Width <= amount.Width,
                             "Полная сумма с копейками и ₽ должна помещаться при DPI=" + dpi);
@@ -220,6 +207,27 @@ namespace Krs.AcquiringMonitor.Tests
                         TestAssert.True(amount.Right < grip.Left,
                             "Сумма не должна залезать на край изменения ширины.");
                     }
+                }
+            }
+        }
+
+        public static void ReportResultsDoNotNeedPopupUi()
+        {
+            Type contextType = typeof(OverlayPresentation).Assembly.GetType("Krs.AcquiringMonitor.MonitorApplicationContext", true);
+            MethodInfo report = contextType.GetMethod("SetRefreshResult", BindingFlags.Instance | BindingFlags.NonPublic);
+            TestAssert.True(report != null, "Результат отчёта должен обновлять оверлей без всплывающего UI.");
+            using (var overlay = OverlayAppearanceTests.CreateOverlay())
+            {
+                // Do not run the app constructor: it starts timers, autostart and bank monitoring.
+                object context = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(contextType);
+                contextType.GetField("_overlay", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(context, overlay);
+                foreach (bool failed in new[] { false, true })
+                {
+                    report.Invoke(context, new object[] { "Результат отчёта", "Тестовое состояние", failed });
+                    TestAssert.True(overlay.Controls[1].AccessibleDescription.Contains("Тестовое состояние"),
+                        "Результат доступен в подсказке без объекта уведомлений трея.");
+                    TestAssert.Equal(failed, overlay.Controls[1].ForeColor.ToArgb() != Color.White.ToArgb());
+                    TestAssert.Equal("1 475,00 ₽", overlay.Controls[1].Text);
                 }
             }
         }

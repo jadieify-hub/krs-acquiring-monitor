@@ -64,6 +64,9 @@ namespace Krs.AcquiringMonitor
             _lifetimeCancellation = new CancellationTokenSource();
             _overlay = new OverlayForm();
             _overlay.SetAppearance(_settings.OverlayWidth, _settings.OverlayFontSize);
+            _overlay.SetColors(_settings.OverlayTextColorArgb, _settings.OverlayAttentionColorArgb);
+            _overlay.SetTypography(_settings.OverlayFontFamily, _settings.OverlayNamesBold,
+                _settings.OverlayAmountsBold ?? true);
             _overlay.RefreshRequested += RefreshFromTerminal;
             _overlay.PositionCommitted += SaveOverlayPosition;
             _overlay.FormClosed += ExitApplication;
@@ -309,18 +312,11 @@ namespace Krs.AcquiringMonitor
 
         private void RefreshFromTerminal(object sender, EventArgs eventArgs)
         {
-            if (_refreshing)
+            if (_refreshing || _manualRefreshPending)
             {
                 return;
             }
 
-            if (_manualRefreshPending)
-            {
-                MessageBox.Show(
-                    GetDeferredRefreshMessage(), AppConstants.ApplicationName,
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
             _manualRefreshPending = true;
             _manualRefreshNoticeShown = false;
             _overlay.SetRefreshStatus(string.Empty);
@@ -442,10 +438,6 @@ namespace Krs.AcquiringMonitor
             _logger.Write(SafeLogEvent.TerminalQueryDeferred,
                 _logMonitor != null && _logMonitor.HasPendingOperation ? "bank-operation" : "log-stale",
                 null);
-            ShowBalloon(
-                "Обновление запланировано",
-                GetDeferredRefreshMessage(),
-                ToolTipIcon.Warning);
         }
 
         private string GetDeferredRefreshMessage()
@@ -455,21 +447,13 @@ namespace Krs.AcquiringMonitor
                 : "Запрос принят. Журнал UPOS недоступен или закрытие смены завершено не для всех отделов. Запрос выполнится после восстановления журнала.";
         }
 
-        private void ShowRefreshResult(string title, string message, bool interactive, bool failed)
+        private void SetRefreshResult(string title, string message, bool failed)
         {
             if (_exiting)
             {
                 return;
             }
             _overlay.SetRefreshStatus(title + ". " + message, failed);
-            if (interactive && failed)
-            {
-                MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            else if (interactive)
-            {
-                ShowBalloon(title, message, ToolTipIcon.Info);
-            }
         }
 
         private async void QueryTerminalAsync(
@@ -501,8 +485,8 @@ namespace Krs.AcquiringMonitor
                         SafeLogEvent.TerminalQueryFailed,
                         "helper",
                         null);
-                    ShowRefreshResult("Не удалось получить итоги",
-                        result.ErrorMessage, interactive, true);
+                    SetRefreshResult("Не удалось получить итоги",
+                        result.ErrorMessage, true);
 
                     return;
                 }
@@ -515,9 +499,9 @@ namespace Krs.AcquiringMonitor
                         SafeLogEvent.TerminalQueryFailed,
                         "report-format",
                         null);
-                    ShowRefreshResult("Отчёт не применён",
+                    SetRefreshResult("Отчёт не применён",
                         "Формат отчёта терминала не распознан (report-format). " +
-                        "Суммы по журналу не изменены.", interactive, true);
+                        "Суммы по журналу не изменены.", true);
 
                     return;
                 }
@@ -534,9 +518,9 @@ namespace Krs.AcquiringMonitor
                         SafeLogEvent.TerminalQueryFailed,
                         "partial-report",
                         null);
-                    ShowRefreshResult("Отчёт не применён",
+                    SetRefreshResult("Отчёт не применён",
                         "Терминал вернул неполный или неоднозначный отчёт. Суммы не изменены.",
-                        interactive, true);
+                        true);
 
                     return;
                 }
@@ -549,9 +533,9 @@ namespace Krs.AcquiringMonitor
                     !monitor.TryApplyAuthoritativeTotals(totals, logRevision))
                 {
                     _logger.Write(SafeLogEvent.TerminalQueryFailed, "log-changed", null);
-                    ShowRefreshResult("Отчёт не применён",
+                    SetRefreshResult("Отчёт не применён",
                         "Во время запроса изменился журнал или началась банковская операция. Повторите позже.",
-                        interactive, true);
+                        true);
 
                     return;
                 }
@@ -569,7 +553,7 @@ namespace Krs.AcquiringMonitor
                             })
                         .ToList();
                 RememberAutomaticNames(merged);
-                if (!SaveSettings(interactive))
+                if (!SaveSettings(false))
                 {
                     _settings.Organizations = previousOrganizations;
                 }
@@ -578,9 +562,9 @@ namespace Krs.AcquiringMonitor
                     SafeLogEvent.TerminalQuerySucceeded,
                     "organizations=" + merged.Count,
                     null);
-                ShowRefreshResult("Итоги обновлены",
+                SetRefreshResult("Итоги обновлены",
                     "Суммы получены непосредственно из текущего отчёта терминала.",
-                    interactive, false);
+                    false);
             }
             catch (Exception exception)
             {
@@ -588,9 +572,9 @@ namespace Krs.AcquiringMonitor
                     SafeLogEvent.TerminalQueryFailed,
                     "unexpected",
                     exception);
-                ShowRefreshResult("Не удалось получить итоги",
+                SetRefreshResult("Не удалось получить итоги",
                     "Произошла техническая ошибка. Предыдущие суммы сохранены.",
-                    interactive, true);
+                    true);
             }
             finally
             {

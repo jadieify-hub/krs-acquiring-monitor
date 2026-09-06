@@ -19,6 +19,10 @@ namespace Krs.AcquiringMonitor.Tests
             {
                 return RuntimeDiagnostics.RenderPreview(args[1]);
             }
+            if (args.Length == 2 && args[0] == "--render-settings")
+            {
+                return RuntimeDiagnostics.RenderSettingsPreview(args[1]);
+            }
             Run("успешная покупка отдела 1", BankLogParserTests.SuccessfulPurchaseDepartment1);
             Run("успешная покупка отдела 2", BankLogParserTests.SuccessfulPurchaseDepartment2);
             Run("возврат уменьшает итог", BankLogParserTests.SuccessfulRefundSubtracts);
@@ -86,14 +90,22 @@ namespace Krs.AcquiringMonitor.Tests
             Run("неизвестная сумма показывается прочерком", OverlayPresentationTests.UnknownAmountUsesDash);
             Run("распознаётся только окно Frontol", OverlayPresentationTests.RecognizesFrontolWindowIdentity);
             Run("оверлей привязан к самой большой форме Frontol", OverlayPresentationTests.UsesLargestVisibleFrontolSurfaceForPlacement);
-            Run("белый текст не имеет цветной каймы", OverlayPresentationTests.RendersWhiteTextWithoutColorKeyFringe);
+            Run("активное главное окно Frontol разрешает оверлей", FrontolWindowTrackerTests.SelectsForegroundMainWindow);
+            Run("всплывающее окно Frontol скрывает оверлей", FrontolWindowTrackerTests.RejectsForegroundPopupFromFrontolProcess);
+            Run("отсутствие главного окна Frontol скрывает оверлей", FrontolWindowTrackerTests.RejectsMissingMainWindow);
+            Run("сглаженный текст имеет прозрачный фон без цветной каймы", OverlayPresentationTests.RendersSmoothTextOnTransparentSurface);
             Run("названия организаций отображаются обычным шрифтом", OverlayPresentationTests.UsesRegularOrganizationFont);
             Run("полная сумма не обрезается и не перекрывает край", OverlayPresentationTests.AmountDoesNotOverlapResizeGrip);
             Run("ошибка сверки остаётся доступной после запроса", OverlayPresentationTests.RefreshFailureRemainsVisible);
+            Run("результат отчёта доступен без всплывающего UI", OverlayPresentationTests.ReportResultsDoNotNeedPopupUi);
             Run("ширина меняется без изменения шрифта", OverlayAppearanceTests.WidthChangesWithoutChangingFont);
             Run("обновление только двойным щелчком по сумме", OverlayAppearanceTests.RefreshesOnlyOnAmountDoubleClick);
             Run("отмена прекращает незаконченный жест без сохранения", OverlayAppearanceTests.CancelStopsUnfinishedDrag);
             Run("предпросмотр не сохраняет настройки до подтверждения", OverlayAppearanceTests.PreviewDoesNotChangeSettingsUntilSaved);
+            Run("выбранные цвета сохраняются при обновлении оверлея", OverlayAppearanceTests.CustomColorsSurviveRefreshAndResize);
+            Run("шрифт и жирность сохраняются только по подтверждению", OverlayAppearanceTests.FontPreviewSavesOnlyOnConfirmation);
+            Run("предпросмотр цветов сохраняется только по подтверждению", OverlayAppearanceTests.ColorPreviewSavesOnlyOnConfirmation);
+            Run("старые и невидимые цвета заменяются прежними цветами", OverlayAppearanceTests.OldOrInvisibleColorsUseVisibleDefaults);
             Run("форма показывает утверждённую страницу CloudTips", SupportConfigurationTests.DisplaysApprovedCloudTipsPage);
 
             if (Failures.Count == 0)
@@ -116,7 +128,7 @@ namespace Krs.AcquiringMonitor.Tests
             catch (Exception exception)
             {
                 Failures.Add(name);
-                Console.Error.WriteLine("FAIL  " + name + ": " + exception.Message);
+                Console.Error.WriteLine("FAIL  " + name + ": " + exception);
             }
         }
     }

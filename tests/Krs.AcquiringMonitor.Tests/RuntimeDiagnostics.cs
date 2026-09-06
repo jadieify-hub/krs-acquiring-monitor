@@ -3,8 +3,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Krs.AcquiringMonitor.Configuration;
 using Krs.AcquiringMonitor.Frontol;
 using Krs.AcquiringMonitor.Monitoring;
 using Krs.AcquiringMonitor.UI;
@@ -16,7 +18,7 @@ namespace Krs.AcquiringMonitor.Tests
         public static int RenderPreview(string path)
         {
             using (Form overlay = OverlayAppearanceTests.CreateOverlay())
-            using (var bitmap = new Bitmap(700, 240))
+            using (var bitmap = new Bitmap(700, 480))
             using (Graphics graphics = Graphics.FromImage(bitmap))
             {
                 overlay.GetType().GetMethod("SetRows").Invoke(overlay, new object[]
@@ -27,16 +29,42 @@ namespace Krs.AcquiringMonitor.Tests
                         new OverlayRow(2, "ООО Колокольчик", "237,00 ₽", false)
                     }
                 });
-                overlay.BackColor = Color.FromArgb(70, 82, 90);
-                overlay.TransparencyKey = Color.Empty;
-                graphics.Clear(overlay.BackColor);
-                overlay.GetType().GetMethod("SetAppearance").Invoke(overlay,
-                    new object[] { 340, 13f });
-                DrawForm(overlay, graphics, new Point(20, 20));
-                overlay.GetType().GetMethod("SetAppearance").Invoke(overlay,
-                    new object[] { 650, 20f });
-                DrawForm(overlay, graphics, new Point(20, 125));
+                for (int theme = 0; theme < 2; theme++)
+                {
+                    using (var background = new SolidBrush(theme == 0 ? Color.FromArgb(70, 82, 90) : Color.White))
+                        graphics.FillRectangle(background, 0, theme * 240, 700, 240);
+                    overlay.GetType().GetMethod("SetColors").Invoke(overlay, new object[]
+                    {
+                        (theme == 0 ? AppSettings.DefaultOverlayTextColor : Color.Black).ToArgb(),
+                        (theme == 0 ? AppSettings.DefaultOverlayAttentionColor : Color.DarkRed).ToArgb(), false
+                    });
+                    overlay.GetType().GetMethod("SetRefreshStatus").Invoke(overlay,
+                        new object[] { "", false });
+                    overlay.GetType().GetMethod("SetAppearance").Invoke(overlay,
+                        new object[] { 340, 13f });
+                    DrawForm(overlay, graphics, new Point(20, theme * 240 + 20));
+                    overlay.GetType().GetMethod("SetRefreshStatus").Invoke(overlay,
+                        new object[] { "Демонстрация предупреждения", true });
+                    overlay.GetType().GetMethod("SetAppearance").Invoke(overlay,
+                        new object[] { 650, 20f });
+                    DrawForm(overlay, graphics, new Point(20, theme * 240 + 125));
+                }
 
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+                bitmap.Save(path, ImageFormat.Png);
+            }
+            Console.WriteLine(Path.GetFullPath(path));
+            return 0;
+        }
+
+        public static int RenderSettingsPreview(string path)
+        {
+            using (Form overlay = OverlayAppearanceTests.CreateOverlay())
+            using (Form settings = OverlayAppearanceTests.CreateSettingsEditor(AppSettings.CreateDefault(), overlay))
+            using (var bitmap = new Bitmap(settings.Width, settings.Height))
+            {
+                CreateHandles(settings);
+                settings.DrawToBitmap(bitmap, new Rectangle(Point.Empty, settings.Size));
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
                 bitmap.Save(path, ImageFormat.Png);
             }
@@ -46,12 +74,9 @@ namespace Krs.AcquiringMonitor.Tests
 
         private static void DrawForm(Form form, Graphics graphics, Point location)
         {
-            CreateHandles(form);
-            using (var bitmap = new Bitmap(form.Width, form.Height))
-            {
-                form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+            using (var bitmap = (Bitmap)form.GetType().GetMethod("RenderBitmap", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(form, null))
                 graphics.DrawImageUnscaled(bitmap, location);
-            }
         }
 
         private static void CreateHandles(Control control)
@@ -81,6 +106,11 @@ namespace Krs.AcquiringMonitor.Tests
                 FrontolWindowInfo info;
                 tracker.TryGetActive(out info);
             });
+            using (Form overlay = OverlayAppearanceTests.CreateOverlay())
+            {
+                MethodInfo render = overlay.GetType().GetMethod("RenderSurface", BindingFlags.Instance | BindingFlags.NonPublic);
+                Measure("overlay-alpha-render", () => render.Invoke(overlay, null));
+            }
 
             string directory = Path.Combine(Path.GetTempPath(),
                 "KRS-idle-probe-" + Guid.NewGuid().ToString("N"));

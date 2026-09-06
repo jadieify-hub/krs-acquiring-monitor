@@ -483,7 +483,7 @@ namespace Krs.AcquiringMonitor.Tests
                 "01.09 21:50:42.030 PILOT: close_day: result=0, RC=0\r\n";
         }
 
-        private sealed class TemporaryDirectory : IDisposable
+        internal sealed class TemporaryDirectory : IDisposable
         {
             public TemporaryDirectory()
             {

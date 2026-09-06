@@ -47,6 +47,12 @@ namespace Krs.AcquiringMonitor.Configuration
             settings.UposDirectory = settings.UposDirectory ?? string.Empty;
             settings.OverlayWidth = AppSettings.NormalizeOverlayWidth(settings.OverlayWidth);
             settings.OverlayFontSize = AppSettings.NormalizeOverlayFontSize(settings.OverlayFontSize);
+            settings.OverlayFontFamily = AppSettings.NormalizeOverlayFontFamily(settings.OverlayFontFamily);
+            settings.OverlayAmountsBold = settings.OverlayAmountsBold ?? true;
+            settings.OverlayTextColorArgb = AppSettings.NormalizeOverlayColor(
+                settings.OverlayTextColorArgb, AppSettings.DefaultOverlayTextColor).ToArgb();
+            settings.OverlayAttentionColorArgb = AppSettings.NormalizeOverlayColor(
+                settings.OverlayAttentionColorArgb, AppSettings.DefaultOverlayAttentionColor).ToArgb();
             return settings;
         }
 
