@@ -4,9 +4,9 @@
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
-    <Version>0.2.8</Version>
-    <FileVersion>0.2.8.0</FileVersion>
-    <AssemblyVersion>0.2.8.0</AssemblyVersion>
+    <Version>0.2.9</Version>
+    <FileVersion>0.2.9.0</FileVersion>
+    <AssemblyVersion>0.2.9.0</AssemblyVersion>
     <Authors>Руслан Керусов</Authors>
     <Company>KRS</Company>
     <Product>KRS Эквайринг Монитор</Product>

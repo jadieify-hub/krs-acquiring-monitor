@@ -38,6 +38,7 @@ namespace Krs.AcquiringMonitor.Frontol
             uint processId;
             NativeMethods.GetWindowThreadProcessId(foregroundWindow, out processId);
             string processName = string.Empty;
+            string mainWindowTitle = string.Empty;
             try
             {
                 using (Process process = Process.GetProcessById((int)processId))
@@ -51,6 +52,7 @@ namespace Krs.AcquiringMonitor.Frontol
                         _identityProcessId = processId;
                     }
                     processName = _processName;
+                    mainWindowTitle = process.MainWindowTitle;
                 }
             }
             catch (ArgumentException)
@@ -60,31 +62,40 @@ namespace Krs.AcquiringMonitor.Frontol
             {
             }
 
-            FrontolWindowInfo mainWindow = SelectAnchorWindow(
-                FindVisibleWindows(processId, processName));
-            info = SelectActiveMainWindow(
-                foregroundWindow,
-                mainWindow,
-                processName,
-                mainWindow == null ? string.Empty : GetWindowTitle(mainWindow.Handle));
+            if (string.IsNullOrWhiteSpace(mainWindowTitle))
+            {
+                mainWindowTitle = GetWindowTitle(foregroundWindow);
+            }
+
+            if (!IsFrontolIdentity(processName, mainWindowTitle))
+            {
+                return false;
+            }
+
+            info = FindActiveAnchorWindow(processId, foregroundWindow);
             return info != null;
         }
 
-        public static FrontolWindowInfo SelectActiveMainWindow(
-            IntPtr foregroundWindow,
-            FrontolWindowInfo mainWindow,
-            string processName,
-            string title)
+        private static FrontolWindowInfo FindActiveAnchorWindow(uint processId, IntPtr foregroundWindow)
         {
-            if (mainWindow == null ||
-                mainWindow.Handle == IntPtr.Zero ||
-                mainWindow.Handle != foregroundWindow ||
-                !IsFrontolIdentity(processName, title))
+            if (!NativeMethods.IsWindowVisible(foregroundWindow) ||
+                !NativeMethods.IsWindowEnabled(foregroundWindow) ||
+                NativeMethods.IsIconic(foregroundWindow))
             {
                 return null;
             }
 
-            return mainWindow;
+            var className = new StringBuilder(256);
+            NativeMethods.GetClassName(foregroundWindow, className, className.Capacity);
+            // Frontol's real registration window is owned by TApplication, just like its dialogs.
+            // ponytail: TfrmMain is verified on Frontol 6.28.8; add other classes only after a window probe.
+            if (!string.Equals(className.ToString(), "TfrmMain", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            // Visibility follows TfrmMain, but placement keeps the old background anchor and saved offsets.
+            return SelectAnchorWindow(FindVisibleWindows(processId));
         }
 
         public static FrontolWindowInfo SelectAnchorWindow(
@@ -132,8 +143,7 @@ namespace Krs.AcquiringMonitor.Frontol
         }
 
         private static IReadOnlyList<FrontolWindowInfo> FindVisibleWindows(
-            uint processId,
-            string processName)
+            uint processId)
         {
             var windows = new List<FrontolWindowInfo>();
             NativeMethods.EnumWindows(
@@ -145,10 +155,7 @@ namespace Krs.AcquiringMonitor.Frontol
                         out candidateProcessId);
                     if (candidateProcessId != processId ||
                         !NativeMethods.IsWindowVisible(window) ||
-                        !NativeMethods.IsWindowEnabled(window) ||
-                        NativeMethods.IsIconic(window) ||
-                        NativeMethods.GetWindow(window, NativeMethods.GwOwner) != IntPtr.Zero ||
-                        !IsFrontolIdentity(processName, GetWindowTitle(window)))
+                        NativeMethods.IsIconic(window))
                     {
                         return true;
                     }
@@ -206,11 +213,6 @@ namespace Krs.AcquiringMonitor.Frontol
             [return: MarshalAs(UnmanagedType.Bool)]
             internal static extern bool IsIconic(IntPtr window);
 
-            internal const uint GwOwner = 4;
-
-            [DllImport("user32.dll")]
-            internal static extern IntPtr GetWindow(IntPtr window, uint command);
-
             [DllImport("user32.dll")]
             internal static extern uint GetWindowThreadProcessId(
                 IntPtr window,
@@ -221,6 +223,13 @@ namespace Krs.AcquiringMonitor.Frontol
                 IntPtr window,
                 StringBuilder text,
                 int maximumCount);
+
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            internal static extern int GetClassName(IntPtr window, StringBuilder text, int maximumCount);
+
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool IsWindowEnabled(IntPtr window);
 
             [DllImport("user32.dll")]
             [return: MarshalAs(UnmanagedType.Bool)]
@@ -235,10 +244,6 @@ namespace Krs.AcquiringMonitor.Frontol
             [DllImport("user32.dll")]
             [return: MarshalAs(UnmanagedType.Bool)]
             internal static extern bool IsWindowVisible(IntPtr window);
-
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool IsWindowEnabled(IntPtr window);
         }
     }
 }

@@ -1,6 +1,6 @@
 #define MyAppName "KRS Эквайринг Монитор"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.8"
+  #define MyAppVersion "0.2.9"
 #endif
 #define MyAppPublisher "KRS"
 #define MyAppExeName "Krs.AcquiringMonitor.exe"

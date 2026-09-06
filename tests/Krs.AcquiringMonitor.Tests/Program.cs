@@ -90,9 +90,8 @@ namespace Krs.AcquiringMonitor.Tests
             Run("неизвестная сумма показывается прочерком", OverlayPresentationTests.UnknownAmountUsesDash);
             Run("распознаётся только окно Frontol", OverlayPresentationTests.RecognizesFrontolWindowIdentity);
             Run("оверлей привязан к самой большой форме Frontol", OverlayPresentationTests.UsesLargestVisibleFrontolSurfaceForPlacement);
-            Run("активное главное окно Frontol разрешает оверлей", FrontolWindowTrackerTests.SelectsForegroundMainWindow);
-            Run("всплывающее окно Frontol скрывает оверлей", FrontolWindowTrackerTests.RejectsForegroundPopupFromFrontolProcess);
-            Run("отсутствие главного окна Frontol скрывает оверлей", FrontolWindowTrackerTests.RejectsMissingMainWindow);
+            Run("рабочая поверхность с владельцем не теряется", FrontolWindowTrackerTests.KeepsOwnedRegistrationSurface);
+            Run("поиск скрывает оверлей и не меняет привязку после закрытия", FrontolWindowTrackerTests.HidesForSearchAndReturnsToSameAnchor);
             Run("сглаженный текст имеет прозрачный фон без цветной каймы", OverlayPresentationTests.RendersSmoothTextOnTransparentSurface);
             Run("названия организаций отображаются обычным шрифтом", OverlayPresentationTests.UsesRegularOrganizationFont);
             Run("полная сумма не обрезается и не перекрывает край", OverlayPresentationTests.AmountDoesNotOverlapResizeGrip);
