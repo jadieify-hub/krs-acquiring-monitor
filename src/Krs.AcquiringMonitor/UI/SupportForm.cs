@@ -13,6 +13,7 @@ namespace Krs.AcquiringMonitor.UI
         public SupportForm()
         {
             Text = "Поддержать разработку";
+            Icon = AppConstants.Icon;
             Font = new Font("Segoe UI", 9.5f);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;

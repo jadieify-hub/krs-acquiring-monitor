@@ -276,7 +276,7 @@ namespace Krs.AcquiringMonitor.Tests
                     width.Value = 650;
                     font.Value = 20;
                     TestAssert.Equal(20f, overlay.Controls[0].Font.Size);
-                    TestAssert.Equal(470, settings.OverlayWidth);
+                    TestAssert.Equal(370, settings.OverlayWidth);
                     TestAssert.Equal(15.5f, settings.OverlayFontSize);
                     Button save = (Button)editor.AcceptButton;
                     typeof(Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)

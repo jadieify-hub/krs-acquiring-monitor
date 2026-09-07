@@ -48,7 +48,11 @@ namespace Krs.AcquiringMonitor.Tests
             {
                 var findAnchor = typeof(FrontolWindowTracker).GetMethod(
                     "FindActiveAnchorWindow", BindingFlags.NonPublic | BindingFlags.Static);
-                return (FrontolWindowInfo)findAnchor.Invoke(null, new object[] { (uint)process.Id, foreground });
+                var arguments = new object[] { (uint)process.Id, foreground, null };
+                var anchor = (FrontolWindowInfo)findAnchor.Invoke(null, arguments);
+                TestAssert.True(!string.IsNullOrWhiteSpace((string)arguments[2]),
+                    "Каждое состояние окна должно объясняться в диагностике.");
+                return anchor;
             }
         }
 

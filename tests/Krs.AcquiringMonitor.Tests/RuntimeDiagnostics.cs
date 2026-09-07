@@ -72,6 +72,31 @@ namespace Krs.AcquiringMonitor.Tests
             return 0;
         }
 
+        public static int RenderDiagnosticsPreview(string path)
+        {
+            Type type = typeof(OverlayPresentation).Assembly.GetType("Krs.AcquiringMonitor.UI.DiagnosticsForm", true);
+            Func<string> read = () =>
+                "KRS Эквайринг Монитор — демонстрация\r\n" +
+                "Время: 2026-09-07 15:00:00 +03:00\r\n" +
+                "Система: Windows 10; процесс x86\r\nUPOS: C:\\SC552\r\nЖурнал: sbkernel2609.log\r\n" +
+                "Данные: журнал доступен, незавершённых операций нет\r\nЗапрос итогов: не выполняется\r\n" +
+                "Frontol: Главное окно TfrmMain распознано, оверлей разрешён.\r\n" +
+                "Последнее окно Frontol: 15:00:00: Главное окно TfrmMain распознано, оверлей разрешён.\r\n" +
+                "Оверлей: скрыт\r\nПроверка версии: 2026-09-07 15:00:00 +03:00\r\n" +
+                "Обновление программы: Новых версий нет.\r\n" +
+                "Последняя ошибка в этой сессии: 2026-09-07 14:00:00 TerminalQueryFailed report-format\r\n";
+            using (var form = (Form)Activator.CreateInstance(type, new object[] { read }))
+            using (var bitmap = new Bitmap(form.Width, form.Height))
+            {
+                CreateHandles(form);
+                form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+                bitmap.Save(path, ImageFormat.Png);
+            }
+            Console.WriteLine(Path.GetFullPath(path));
+            return 0;
+        }
+
         private static void DrawForm(Form form, Graphics graphics, Point location)
         {
             using (var bitmap = (Bitmap)form.GetType().GetMethod("RenderBitmap", BindingFlags.Instance | BindingFlags.NonPublic)

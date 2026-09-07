@@ -45,7 +45,19 @@ namespace Krs.AcquiringMonitor.Updates
             out ValidatedUpdate update)
         {
             update = null;
-            if (string.IsNullOrWhiteSpace(json) || currentVersion == null)
+            ValidatedUpdate parsed;
+            if (currentVersion == null || !TryParse(json, out parsed)) return false;
+            var normalizedCurrent = new Version(
+                currentVersion.Major, currentVersion.Minor, Math.Max(0, currentVersion.Build));
+            if (parsed.Version.CompareTo(normalizedCurrent) <= 0) return false;
+            update = parsed;
+            return true;
+        }
+
+        public static bool TryParse(string json, out ValidatedUpdate update)
+        {
+            update = null;
+            if (string.IsNullOrWhiteSpace(json))
             {
                 return false;
             }
@@ -88,15 +100,6 @@ namespace Krs.AcquiringMonitor.Updates
                     version.ToString(3),
                     StringComparison.Ordinal) ||
                 !IsValidSha256(manifest.Sha256))
-            {
-                return false;
-            }
-
-            var normalizedCurrent = new Version(
-                currentVersion.Major,
-                currentVersion.Minor,
-                Math.Max(0, currentVersion.Build));
-            if (version.CompareTo(normalizedCurrent) <= 0)
             {
                 return false;
             }

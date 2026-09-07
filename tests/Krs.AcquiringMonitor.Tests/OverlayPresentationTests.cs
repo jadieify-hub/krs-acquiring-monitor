@@ -162,7 +162,7 @@ namespace Krs.AcquiringMonitor.Tests
 
                 TestAssert.Equal("Segoe UI", font.Name);
                 TestAssert.Equal(FontStyle.Regular, font.Style);
-                TestAssert.Equal(470, (int)formType.GetProperty("Width").GetValue(form, null));
+                TestAssert.Equal(370, (int)formType.GetProperty("Width").GetValue(form, null));
                 TestAssert.True(
                     nameLeft + nameWidth <= amountLeft,
                     "Название и сумма не должны пересекаться.");

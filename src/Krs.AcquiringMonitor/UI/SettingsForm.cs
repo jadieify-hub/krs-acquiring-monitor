@@ -33,6 +33,7 @@ namespace Krs.AcquiringMonitor.UI
             _settings = settings;
             _preview = preview;
             Text = AppConstants.ApplicationName + " — настройки";
+            Icon = AppConstants.Icon;
             Font = new Font("Segoe UI", 9.5f);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;

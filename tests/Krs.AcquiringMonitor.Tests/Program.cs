@@ -23,6 +23,10 @@ namespace Krs.AcquiringMonitor.Tests
             {
                 return RuntimeDiagnostics.RenderSettingsPreview(args[1]);
             }
+            if (args.Length == 2 && args[0] == "--render-diagnostics")
+            {
+                return RuntimeDiagnostics.RenderDiagnosticsPreview(args[1]);
+            }
             Run("успешная покупка отдела 1", BankLogParserTests.SuccessfulPurchaseDepartment1);
             Run("успешная покупка отдела 2", BankLogParserTests.SuccessfulPurchaseDepartment2);
             Run("возврат уменьшает итог", BankLogParserTests.SuccessfulRefundSubtracts);
@@ -58,7 +62,9 @@ namespace Krs.AcquiringMonitor.Tests
             Run("перезапуск восстанавливает те же итоги", MonthRolloverTests.RestartRebuildsSameTotals);
             Run("недоступная папка возвращает устаревшее значение", MonthRolloverTests.MissingDirectoryUsesStaleFallback);
             Run("настройки сохраняются в профиле приложения", MonthRolloverTests.SettingsRoundTrip);
-            Run("старые настройки сохраняют привычный размер", MonthRolloverTests.OldSettingsKeepDefaultAppearance);
+            Run("сброс перечитывает данные и сохраняет оформление", () => MonitorDataResetTests.ResetsDataWithoutChangingAppearance(false));
+            Run("блокировка кэша не стирает прежние данные", () => MonitorDataResetTests.ResetsDataWithoutChangingAppearance(true));
+            Run("новая ширина по умолчанию не заменяет сохранённую", MonthRolloverTests.OldSettingsKeepDefaultAppearance);
             Run("банковское имя отделено от подписи", MonthRolloverTests.KeepsBankIdentitySeparateFromDisplayName);
             Run("нестабильное состояние не затирает контрольную точку", MonthRolloverTests.RejectsUnstableRuntimeCheckpoint);
             Run("устаревший ручной снимок не перезаписывает оплату", MonthRolloverTests.RejectsManualSnapshotAfterLogChanged);
@@ -67,6 +73,8 @@ namespace Krs.AcquiringMonitor.Tests
             Run("непрочитанные строки блокируют ручной снимок", MonthRolloverTests.RejectsManualSnapshotWhenLogHasUnreadBytes);
             Run("ручной снимок без журнала отклоняется", MonthRolloverTests.RejectsManualSnapshotWithoutLogAnchor);
             Run("ручная база продолжается с сохранённой позиции", MonthRolloverTests.ManualSnapshotResumesFromSavedOffset);
+            Run("выход не ждёт читателя и сохраняет безопасную базу", MonitorShutdownTests.ShutdownKeepsSafeCheckpointWithoutWaitingForReader);
+            Run("скрытый оверлей принимает системное закрытие", MonitorShutdownTests.HiddenOverlayHandlesSessionShutdown);
             Run("перезапуск между закрытиями завершает обнуление", MonthRolloverTests.RestartBetweenDepartmentClosesCompletesReset);
             Run("состояние привязано к каталогу UPOS", MonthRolloverTests.RuntimeStateIsBoundToUposDirectory);
             Run("исчезновение активного журнала не повторяет старый месяц", MonthRolloverTests.MissingActiveLogKeepsLastSnapshotStale);
@@ -85,6 +93,7 @@ namespace Krs.AcquiringMonitor.Tests
             Run("SHA-256 установщика проверяется", UpdateManifestTests.VerifiesInstallerSha256);
             Run("изменённый ожидающий установщик не запускается", UpdateManifestTests.RejectsInstallerChangedWhileWaiting);
             Run("обновления повторяются и ждут безопасной паузы", UpdateScheduleTests.RepeatsChecksAndWaitsForIdle);
+            Run("диагностика показывает причины без банковских данных", DiagnosticsTests.ReportsTechnicalStateWithoutBankData);
             Run("сумма оверлея имеет две копейки", OverlayPresentationTests.FormatsCurrencyWithTwoDecimals);
             Run("оверлей показывает обнаруженные организации", OverlayPresentationTests.BuildsRowsForDiscoveredDepartments);
             Run("неизвестная сумма показывается прочерком", OverlayPresentationTests.UnknownAmountUsesDash);

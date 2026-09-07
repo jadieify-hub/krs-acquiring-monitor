@@ -7,7 +7,7 @@ namespace Krs.AcquiringMonitor.Tests
     internal static class SupportConfigurationTests
     {
         private const string ApprovedSupportUrl =
-            "https://pay.cloudtips.ru/p/2f23e8c9";
+            "https://pay.cloudtips.ru/p/53698013";
 
         public static void DisplaysApprovedCloudTipsPage()
         {

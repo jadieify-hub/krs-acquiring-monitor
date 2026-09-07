@@ -14,6 +14,10 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.False(schedule.TryBeginCheck(now.AddHours(5)), "Не опрашиваем GitHub каждый тик.");
             TestAssert.True(schedule.TryBeginCheck(now.AddHours(6).AddSeconds(3)),
                 "Касса без перезапуска должна получить следующую проверку.");
+            TestAssert.True(schedule.TryBeginCheck(now.AddHours(7), true),
+                "Ручная проверка не должна ждать шестичасового интервала.");
+            TestAssert.False(schedule.TryBeginCheck(now.AddHours(12)),
+                "Ручная проверка также отодвигает следующую автоматическую.");
 
             TestAssert.False(schedule.CanInstall(now, 1, false), "Сначала ждём спокойную паузу.");
             TestAssert.False(schedule.CanInstall(now.AddSeconds(30), 1, true),

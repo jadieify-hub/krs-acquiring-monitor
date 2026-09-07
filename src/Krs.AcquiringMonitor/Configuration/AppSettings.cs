@@ -9,7 +9,7 @@ namespace Krs.AcquiringMonitor.Configuration
     [DataContract]
     public sealed class AppSettings
     {
-        public const int DefaultOverlayWidth = 470;
+        public const int DefaultOverlayWidth = 370;
         public const int MinimumOverlayWidth = 200;
         public const int MaximumOverlayWidth = 1600;
         public const float DefaultOverlayFontSize = 15.5f;

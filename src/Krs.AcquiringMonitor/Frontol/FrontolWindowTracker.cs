@@ -26,12 +26,16 @@ namespace Krs.AcquiringMonitor.Frontol
         private uint _identityProcessId;
         private string _processName = string.Empty;
 
+        public string Status { get; private set; } = "Ещё не проверялось.";
+        public string LastFrontolStatus { get; private set; } = "Frontol ещё не наблюдался.";
+
         public bool TryGetActive(out FrontolWindowInfo info)
         {
             info = null;
             IntPtr foregroundWindow = NativeMethods.GetForegroundWindow();
             if (foregroundWindow == IntPtr.Zero)
             {
+                Status = "Нет активного окна.";
                 return false;
             }
 
@@ -69,19 +73,29 @@ namespace Krs.AcquiringMonitor.Frontol
 
             if (!IsFrontolIdentity(processName, mainWindowTitle))
             {
+                Status = processName.StartsWith("Frontol", StringComparison.OrdinalIgnoreCase)
+                    ? "Процесс Frontol найден, заголовок главного окна не распознан."
+                    : "Активно другое приложение, оверлей скрыт.";
+                if (processName.StartsWith("Frontol", StringComparison.OrdinalIgnoreCase))
+                    LastFrontolStatus = DateTime.Now.ToString("HH:mm:ss") + ": " + Status;
                 return false;
             }
 
-            info = FindActiveAnchorWindow(processId, foregroundWindow);
+            string status;
+            info = FindActiveAnchorWindow(processId, foregroundWindow, out status);
+            Status = status;
+            LastFrontolStatus = DateTime.Now.ToString("HH:mm:ss") + ": " + Status;
             return info != null;
         }
 
-        private static FrontolWindowInfo FindActiveAnchorWindow(uint processId, IntPtr foregroundWindow)
+        private static FrontolWindowInfo FindActiveAnchorWindow(
+            uint processId, IntPtr foregroundWindow, out string status)
         {
             if (!NativeMethods.IsWindowVisible(foregroundWindow) ||
                 !NativeMethods.IsWindowEnabled(foregroundWindow) ||
                 NativeMethods.IsIconic(foregroundWindow))
             {
+                status = "Окно Frontol скрыто, свёрнуто или заблокировано диалогом.";
                 return null;
             }
 
@@ -91,11 +105,16 @@ namespace Krs.AcquiringMonitor.Frontol
             // ponytail: TfrmMain is verified on Frontol 6.28.8; add other classes only after a window probe.
             if (!string.Equals(className.ToString(), "TfrmMain", StringComparison.Ordinal))
             {
+                status = "Активное окно Frontol — " + className + ", ожидается TfrmMain; оверлей скрыт.";
                 return null;
             }
 
             // Visibility follows TfrmMain, but placement keeps the old background anchor and saved offsets.
-            return SelectAnchorWindow(FindVisibleWindows(processId));
+            FrontolWindowInfo anchor = SelectAnchorWindow(FindVisibleWindows(processId));
+            status = anchor == null
+                ? "Главное окно распознано, поверхность для размещения не найдена."
+                : "Главное окно TfrmMain распознано, оверлей разрешён.";
+            return anchor;
         }
 
         public static FrontolWindowInfo SelectAnchorWindow(

@@ -8,6 +8,7 @@ namespace Krs.AcquiringMonitor.UI
         public AboutForm()
         {
             Text = "О программе";
+            Icon = AppConstants.Icon;
             Font = new Font("Segoe UI", 9.5f);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;

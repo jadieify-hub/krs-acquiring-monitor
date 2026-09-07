@@ -71,6 +71,30 @@ namespace Krs.AcquiringMonitor.Configuration
             return Load<RuntimeState>(Path.Combine(_baseDirectory, "state.json"));
         }
 
+        public void ResetMonitorData(AppSettings settings)
+        {
+            if (settings == null)
+            {
+                throw new ArgumentNullException("settings");
+            }
+
+            var previousOrganizations = settings.Organizations;
+            bool settingsSaved = false;
+            settings.Organizations = new System.Collections.Generic.List<OrganizationSetting>();
+            try
+            {
+                SaveSettings(settings);
+                settingsSaved = true;
+                File.Delete(Path.Combine(_baseDirectory, "state.json"));
+            }
+            catch
+            {
+                settings.Organizations = previousOrganizations;
+                if (settingsSaved) SaveSettings(settings);
+                throw;
+            }
+        }
+
         public void SaveRuntimeState(RuntimeState state)
         {
             if (state == null)

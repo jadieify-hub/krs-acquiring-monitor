@@ -134,8 +134,13 @@ namespace Krs.AcquiringMonitor.Tests
                 AppSettings loaded = new SettingsStore(directory.Path).LoadSettings();
                 TestAssert.Equal(444, loaded.OverlayOffsetX);
                 TestAssert.True(loaded.AutoStart, "Старый автозапуск должен сохраниться.");
-                TestAssert.Equal(AppSettings.DefaultOverlayWidth, loaded.OverlayWidth);
+                TestAssert.Equal(370, loaded.OverlayWidth);
                 TestAssert.Equal(AppSettings.DefaultOverlayFontSize, loaded.OverlayFontSize);
+
+                File.WriteAllText(Path.Combine(directory.Path, "settings.json"),
+                    "{\"OverlayWidth\":470}");
+                loaded = new SettingsStore(directory.Path).LoadSettings();
+                TestAssert.Equal(470, loaded.OverlayWidth);
             }
         }
 
@@ -315,13 +320,15 @@ namespace Krs.AcquiringMonitor.Tests
                         revision);
 
                     TestAssert.True(applied, "Ручная база должна примениться.");
+                    File.AppendAllText(logPath, SuccessfulPurchase(1, 5000).Substring(0, 23));
+                    monitor.RefreshNow();
                     checkpoint = monitor.CaptureCheckpoint(
                         out checkpointFile,
                         out checkpointOffset,
                         out checkpointHash);
                 }
 
-                File.AppendAllText(logPath, SuccessfulPurchase(1, 5000));
+                File.AppendAllText(logPath, SuccessfulPurchase(1, 5000).Substring(23));
 
                 using (var restarted = new BankLogMonitor(
                     directory.Path,

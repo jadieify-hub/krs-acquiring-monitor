@@ -90,6 +90,7 @@ namespace Krs.AcquiringMonitor.UI
 
         public OverlayForm()
         {
+            Icon = AppConstants.Icon;
             // Measure and arrange with the same DPI as DrawString; do not scale twice.
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.Black;

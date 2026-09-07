@@ -25,6 +25,9 @@ namespace Krs.AcquiringMonitor.Diagnostics
     {
         private readonly object _sync = new object();
         private readonly string _path;
+        private volatile string _lastFailure;
+
+        public string LastFailure { get { return _lastFailure; } }
 
         public SafeLogger(string baseDirectory)
         {
@@ -47,6 +50,12 @@ namespace Krs.AcquiringMonitor.Diagnostics
                     detail,
                     exceptionName,
                     Environment.NewLine);
+
+                if (eventCode == SafeLogEvent.LogMonitorUnavailable ||
+                    eventCode == SafeLogEvent.SettingsFailure ||
+                    eventCode == SafeLogEvent.TerminalQueryFailed ||
+                    eventCode == SafeLogEvent.UpdateCheckFailed)
+                    _lastFailure = line.TrimEnd();
 
                 lock (_sync)
                 {

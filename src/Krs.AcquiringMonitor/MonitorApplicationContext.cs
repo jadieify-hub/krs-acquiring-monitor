@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -41,7 +42,11 @@ namespace Krs.AcquiringMonitor
         private bool _manualRefreshPending;
         private bool _manualRefreshNoticeShown;
         private SettingsForm _settingsForm;
+        private DiagnosticsForm _diagnosticsForm;
+        private string _frontolStatusBeforeDiagnostics;
         private bool _updateChecking;
+        private bool _maintenanceRunning;
+        private bool _resettingData;
         private bool _exiting;
 
         public MonitorApplicationContext()
@@ -69,13 +74,17 @@ namespace Krs.AcquiringMonitor
                 _settings.OverlayAmountsBold ?? true);
             _overlay.RefreshRequested += RefreshFromTerminal;
             _overlay.PositionCommitted += SaveOverlayPosition;
-            _overlay.FormClosed += ExitApplication;
+            // Restart Manager can destroy the hidden taskbar owner without sending FormClosed.
+            _overlay.HandleDestroyed += delegate
+            {
+                if (!_overlay.RecreatingHandle) ExitThread();
+            };
             IntPtr unusedHandle = _overlay.Handle;
 
             _trayIcon = new NotifyIcon
             {
                 Text = AppConstants.ApplicationName,
-                Icon = SystemIcons.Information,
+                Icon = AppConstants.Icon,
                 ContextMenuStrip = CreateTrayMenu(),
                 Visible = true
             };
@@ -120,13 +129,12 @@ namespace Krs.AcquiringMonitor
                 return;
             }
 
-            // Persist the latest complete checkpoint before the installer replaces our files.
-            LogSnapshotChanged(_logMonitor, null);
             _exiting = true;
             if (_settingsForm != null)
             {
                 _settingsForm.Close();
             }
+            if (_diagnosticsForm != null) _diagnosticsForm.Close();
             _logger.Write(SafeLogEvent.ApplicationExiting, "requested", null);
             _lifetimeCancellation.Cancel();
             _terminalClient.CancelActiveQuery();
@@ -145,6 +153,7 @@ namespace Krs.AcquiringMonitor
             {
                 _logMonitor.SnapshotChanged -= LogSnapshotChanged;
                 _logMonitor.Dispose();
+                SaveRuntimeCheckpoint(_logMonitor);
                 _logMonitor = null;
             }
 
@@ -160,10 +169,13 @@ namespace Krs.AcquiringMonitor
         {
             var menu = new ContextMenuStrip();
             menu.Items.Add("Настройки", null, ShowSettings);
-            menu.Items.Add("Обновить", null, RefreshFromTerminal);
+            menu.Items.Add("Обновить суммы", null, RefreshFromTerminal);
+            menu.Items.Add("Проверить обновление программы…", null, CheckUpdatesFromMenu);
             menu.Items.Add("Сбросить положение", null, ResetOverlayPosition);
+            menu.Items.Add("Сброс данных монитора…", null, ConfirmMonitorDataReset);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Справка", null, ShowAbout);
+            menu.Items.Add("Диагностика…", null, ShowDiagnostics);
             menu.Items.Add("Поддержать разработку", null, ShowSupport);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Выход", null, ExitApplication);
@@ -217,43 +229,8 @@ namespace Krs.AcquiringMonitor
                     return;
                 }
 
-                string activeLogFileName;
-                long activeLogOffset;
-                string activeLogPrefixHash;
-                BankLogSnapshot snapshot = monitor.CaptureCheckpoint(
-                    out activeLogFileName,
-                    out activeLogOffset,
-                    out activeLogPrefixHash);
-                UpdateOverlay(snapshot);
-                if (!RuntimeState.CanPersistSnapshot(snapshot))
-                {
-                    return;
-                }
-
-                try
-                {
-                    _settingsStore.SaveRuntimeState(
-                        RuntimeState.FromSnapshot(
-                            snapshot,
-                            activeLogFileName,
-                            activeLogOffset,
-                            activeLogPrefixHash,
-                            _settings.UposDirectory));
-                }
-                catch (IOException exception)
-                {
-                    _logger.Write(
-                        SafeLogEvent.SettingsFailure,
-                        "state",
-                        exception);
-                }
-                catch (UnauthorizedAccessException exception)
-                {
-                    _logger.Write(
-                        SafeLogEvent.SettingsFailure,
-                        "state",
-                        exception);
-                }
+                UpdateOverlay(monitor.CurrentSnapshot);
+                SaveRuntimeCheckpoint(monitor);
             };
 
             if (_overlay.InvokeRequired)
@@ -269,6 +246,23 @@ namespace Krs.AcquiringMonitor
             else
             {
                 update();
+            }
+        }
+
+        private void SaveRuntimeCheckpoint(BankLogMonitor monitor)
+        {
+            string fileName, prefixHash;
+            long offset;
+            BankLogSnapshot snapshot = monitor.CaptureCheckpoint(out fileName, out offset, out prefixHash);
+            if (!RuntimeState.CanPersistSnapshot(snapshot)) return;
+            try
+            {
+                _settingsStore.SaveRuntimeState(RuntimeState.FromSnapshot(
+                    snapshot, fileName, offset, prefixHash, _settings.UposDirectory));
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                _logger.Write(SafeLogEvent.SettingsFailure, "state", exception);
             }
         }
 
@@ -312,7 +306,7 @@ namespace Krs.AcquiringMonitor
 
         private void RefreshFromTerminal(object sender, EventArgs eventArgs)
         {
-            if (_refreshing || _manualRefreshPending)
+            if (_resettingData || _refreshing || _manualRefreshPending)
             {
                 return;
             }
@@ -328,46 +322,77 @@ namespace Krs.AcquiringMonitor
             object sender,
             EventArgs eventArgs)
         {
-            if (_exiting)
+            if (_exiting || _resettingData || _maintenanceRunning)
             {
                 return;
             }
 
-            if (_updater.HasPreparedUpdate && _logMonitor != null)
+            _maintenanceRunning = true;
+            try
             {
-                _logMonitor.RefreshNow();
-                if (_updateSchedule.CanInstall(
-                        DateTimeOffset.UtcNow, _logMonitor.CaptureRevision(),
-                        _settingsForm != null || _refreshing || _manualRefreshPending ||
-                        Application.OpenForms.Count > 1 ||
-                        _overlay.IsUserDragging || _logMonitor.HasPendingOperation) &&
-                    _updater.TryStartInstaller())
+                BankLogMonitor monitor = _logMonitor;
+                if (_updater.HasPreparedUpdate && monitor != null)
                 {
-                    ExitThread();
-                    return;
+                    await Task.Run(() => monitor.RefreshNow());
+                    if (_exiting || !ReferenceEquals(monitor, _logMonitor)) return;
+                    if (_updateSchedule.CanInstall(
+                            DateTimeOffset.UtcNow, monitor.CaptureRevision(),
+                            IsBusyForUpdate(monitor)) && _updater.TryStartInstaller())
+                    {
+                        ExitThread();
+                        return;
+                    }
                 }
-            }
 
-            TryStartScheduledTerminalRefresh();
-            if (!_updateChecking && !_updater.HasPreparedUpdate &&
-                _updateSchedule.TryBeginCheck(DateTimeOffset.UtcNow))
+                TryStartScheduledTerminalRefresh();
+            }
+            finally
             {
-                _updateChecking = true;
-                try
-                {
-                    await _updater.CheckAndDownloadAsync(
-                        AppConstants.ApplicationVersion, _lifetimeCancellation.Token);
-                }
-                finally
-                {
-                    _updateChecking = false;
-                }
+                _maintenanceRunning = false;
+            }
+            await CheckUpdatesAsync(false);
+        }
+
+        private bool IsBusyForUpdate(BankLogMonitor monitor)
+        {
+            return _resettingData || _settingsForm != null || _diagnosticsForm != null ||
+                _refreshing || _manualRefreshPending ||
+                Application.OpenForms.Count > 1 || _overlay.IsUserDragging ||
+                monitor.HasPendingOperation || monitor.CurrentSnapshot.IsStale;
+        }
+
+        private async Task CheckUpdatesAsync(bool manual)
+        {
+            if (_exiting) return;
+            if (_updateChecking || _updater.HasPreparedUpdate)
+            {
+                if (manual) ShowBalloon("Обновление программы", _updater.Status, ToolTipIcon.Info);
+                return;
+            }
+            if (!_updateSchedule.TryBeginCheck(DateTimeOffset.UtcNow, manual)) return;
+
+            _updateChecking = true;
+            try
+            {
+                await _updater.CheckAndDownloadAsync(
+                    AppConstants.ApplicationVersion, _lifetimeCancellation.Token);
+                if (manual && !_exiting)
+                    ShowBalloon("Обновление программы", _updater.Status, ToolTipIcon.Info);
+            }
+            finally
+            {
+                _updateChecking = false;
             }
         }
 
-        private void TryStartScheduledTerminalRefresh()
+        private async void CheckUpdatesFromMenu(object sender, EventArgs eventArgs)
         {
-            if (_exiting || _settingsForm != null)
+            await CheckUpdatesAsync(true);
+        }
+
+        private async void TryStartScheduledTerminalRefresh()
+        {
+            if (_exiting || _resettingData || _settingsForm != null)
             {
                 return;
             }
@@ -400,27 +425,32 @@ namespace Krs.AcquiringMonitor
                 return;
             }
 
-            monitor.RefreshNow();
-            long logRevision = monitor.CaptureRevision();
-            if (monitor.HasPendingOperation || monitor.CurrentSnapshot.IsStale)
+            _refreshing = true;
+            try
             {
-                if (interactive)
+                await Task.Run(() => monitor.RefreshNow());
+                if (_exiting || !ReferenceEquals(monitor, _logMonitor)) return;
+                long logRevision = monitor.CaptureRevision();
+                if (monitor.HasPendingOperation || monitor.CurrentSnapshot.IsStale)
                 {
-                    ShowDeferredRefreshNotice();
+                    if (interactive) ShowDeferredRefreshNotice();
+                    return;
                 }
 
-                return;
+                _automaticNameRefreshPolicy.RecordAttempt(now);
+                if (interactive)
+                {
+                    _manualRefreshPending = false;
+                    _manualRefreshNoticeShown = false;
+                    _overlay.SetRefreshDeferred(false);
+                }
+                await QueryTerminalAsync(monitor, logRevision, interactive);
             }
-
-            _automaticNameRefreshPolicy.RecordAttempt(now);
-            if (interactive)
+            finally
             {
-                _manualRefreshPending = false;
-                _manualRefreshNoticeShown = false;
-                _overlay.SetRefreshDeferred(false);
+                _refreshing = false;
+                if (!_overlay.IsDisposed) _overlay.SetRefreshing(false);
             }
-
-            QueryTerminalAsync(monitor, logRevision, interactive);
         }
 
         private void ShowDeferredRefreshNotice()
@@ -456,12 +486,11 @@ namespace Krs.AcquiringMonitor
             _overlay.SetRefreshStatus(title + ". " + message, failed);
         }
 
-        private async void QueryTerminalAsync(
+        private async Task QueryTerminalAsync(
             BankLogMonitor monitor,
             long logRevision,
             bool interactive)
         {
-            _refreshing = true;
             _overlay.SetRefreshing(true);
             _logger.Write(
                 SafeLogEvent.TerminalQueryStarted,
@@ -528,9 +557,13 @@ namespace Krs.AcquiringMonitor
                 var totals = merged.ToDictionary(
                     item => item.Key,
                     item => item.Value.AmountKopeks);
-                monitor.RefreshNow();
-                if (!ReferenceEquals(monitor, _logMonitor) ||
-                    !monitor.TryApplyAuthoritativeTotals(totals, logRevision))
+                bool applied = await Task.Run(() =>
+                {
+                    monitor.RefreshNow();
+                    return monitor.TryApplyAuthoritativeTotals(totals, logRevision);
+                });
+                if (_exiting) return;
+                if (!ReferenceEquals(monitor, _logMonitor) || !applied)
                 {
                     _logger.Write(SafeLogEvent.TerminalQueryFailed, "log-changed", null);
                     SetRefreshResult("Отчёт не применён",
@@ -575,14 +608,6 @@ namespace Krs.AcquiringMonitor
                 SetRefreshResult("Не удалось получить итоги",
                     "Произошла техническая ошибка. Предыдущие суммы сохранены.",
                     true);
-            }
-            finally
-            {
-                _refreshing = false;
-                if (!_overlay.IsDisposed)
-                {
-                    _overlay.SetRefreshing(false);
-                }
             }
         }
 
@@ -630,8 +655,58 @@ namespace Krs.AcquiringMonitor
             }
         }
 
+        private void ShowDiagnostics(object sender, EventArgs eventArgs)
+        {
+            if (_exiting) return;
+            if (_diagnosticsForm != null)
+            {
+                _diagnosticsForm.Activate();
+                return;
+            }
+            _frontolStatusBeforeDiagnostics = _frontolTracker.Status;
+            _diagnosticsForm = new DiagnosticsForm(BuildDiagnostics);
+            _diagnosticsForm.FormClosed += delegate
+            {
+                _diagnosticsForm = null;
+                _frontolStatusBeforeDiagnostics = null;
+            };
+            _diagnosticsForm.Show();
+        }
+
+        private string BuildDiagnostics()
+        {
+            BankLogSnapshot snapshot = _logMonitor == null ? null : _logMonitor.CurrentSnapshot;
+            var text = new StringBuilder();
+            text.AppendLine(AppConstants.ApplicationName + " " + AppConstants.Version);
+            text.AppendLine("Время: " + DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+            text.AppendLine("Система: " + Environment.OSVersion + "; процесс " +
+                (Environment.Is64BitProcess ? "x64" : "x86"));
+            text.AppendLine("UPOS: " + _settings.UposDirectory);
+            text.AppendLine("Журнал: " + (_logMonitor == null || string.IsNullOrEmpty(_logMonitor.ActiveLogFileName)
+                ? "не выбран" : _logMonitor.ActiveLogFileName));
+            text.AppendLine("Данные: " + (snapshot == null ? "монитор не запущен"
+                : snapshot.HasPendingOperation ? "операция не завершена"
+                : snapshot.IsStale ? "устарели / журнал недоступен или смена закрыта не полностью"
+                : "журнал доступен, незавершённых операций нет"));
+            text.AppendLine("Запрос итогов: " + (_refreshing ? "выполняется"
+                : _manualRefreshPending ? "ожидает доступного журнала и завершения операции" : "не выполняется"));
+            text.AppendLine("Frontol: " + (_frontolStatusBeforeDiagnostics ?? _frontolTracker.Status));
+            text.AppendLine("Последнее окно Frontol: " + _frontolTracker.LastFrontolStatus);
+            text.AppendLine("Оверлей: " + (_settingsForm != null ? "предпросмотр в настройках"
+                : _overlay.Visible ? "показан" : "скрыт"));
+            text.AppendLine("Проверка версии: " + (_updater.LastCheckUtc.HasValue
+                ? _updater.LastCheckUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") : "ещё не выполнялась"));
+            text.AppendLine("Обновление программы: " + _updater.Status);
+            text.AppendLine("Последняя ошибка в этой сессии: " + (_logger.LastFailure ?? "не зарегистрирована"));
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return string.IsNullOrEmpty(profile) ? text.ToString()
+                : text.ToString().Replace(profile, "%USERPROFILE%");
+        }
+
         private void ShowSettings(object sender, EventArgs eventArgs)
         {
+            if (_resettingData) return;
+
             if (_settingsForm != null)
             {
                 _settingsForm.Activate();
@@ -760,6 +835,59 @@ namespace Krs.AcquiringMonitor
             _settings.HasCustomPosition = true;
             _settings.OverlayWidth = _overlay.PreferredWidth;
             SaveSettings();
+        }
+
+        private void ConfirmMonitorDataReset(object sender, EventArgs eventArgs)
+        {
+            if (_exiting || _resettingData) return;
+            if (_settingsForm != null || _refreshing)
+            {
+                ShowBalloon("Сброс пока недоступен",
+                    "Закройте настройки и дождитесь завершения запроса итогов.", ToolTipIcon.Warning);
+                return;
+            }
+
+            // A modal confirmation keeps pumping timer messages; defer maintenance until it closes.
+            _resettingData = true;
+            try
+            {
+                DialogResult answer = MessageBox.Show(_overlay,
+                    "Удалить запомненные организации, включая ручные подписи, и кэш сумм монитора? " +
+                    "Оставшиеся журналы UPOS будут прочитаны заново.\r\n\r\n" +
+                    "Папка UPOS, автозапуск, положение и оформление сохранятся. " +
+                    "Банковские файлы и данные терминала не изменятся.\r\n\r\n" +
+                    "Если в оставшихся логах есть чужие записи, организации появятся снова.",
+                    "Сброс данных монитора", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (answer != DialogResult.Yes || _exiting) return;
+
+                ResetMonitorData();
+                ShowBalloon("Данные монитора сброшены",
+                    "Суммы пересчитываются по оставшимся логам. Для получения названий обновите итоги.",
+                    ToolTipIcon.Info);
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                _logger.Write(SafeLogEvent.SettingsFailure, "reset-data", exception);
+                MessageBox.Show(_overlay,
+                    "Не удалось сбросить данные. Проверьте доступ к папке настроек и повторите.",
+                    "Сброс данных монитора", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                _resettingData = false;
+            }
+        }
+
+        private void ResetMonitorData()
+        {
+            // Both calls run on the UI thread: queued old snapshots are rejected after the restart.
+            _settingsStore.ResetMonitorData(_settings);
+            RestartLogMonitor();
+            _manualRefreshPending = false;
+            _manualRefreshNoticeShown = false;
+            _overlay.SetRefreshDeferred(false);
+            _overlay.SetRefreshStatus(string.Empty);
         }
 
         private void ResetOverlayPosition(object sender, EventArgs eventArgs)

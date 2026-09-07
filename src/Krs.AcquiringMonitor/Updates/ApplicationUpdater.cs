@@ -30,18 +30,25 @@ namespace Krs.AcquiringMonitor.Updates
             get { return _installerPath != null; }
         }
 
+        public string Status { get; private set; } = "Проверка ещё не выполнялась.";
+
+        public DateTimeOffset? LastCheckUtc { get; private set; }
+
         public async Task CheckAndDownloadAsync(
             Version currentVersion,
             CancellationToken cancellationToken)
         {
-            if (HasPreparedUpdate || currentVersion == null ||
-                !File.Exists(Path.Combine(
+            if (HasPreparedUpdate || currentVersion == null) return;
+            if (!File.Exists(Path.Combine(
                     AppDomain.CurrentDomain.BaseDirectory,
                     "unins000.exe")))
             {
+                Status = "Portable-копия: обновляйте вручную из официального GitHub Release.";
                 return;
             }
 
+            LastCheckUtc = DateTimeOffset.UtcNow;
+            Status = "Проверяю новую версию…";
             string installerPath = null;
             bool prepared = false;
             try
@@ -60,15 +67,13 @@ namespace Krs.AcquiringMonitor.Updates
                     {
                         if (response.StatusCode == HttpStatusCode.NotFound)
                         {
+                            Fail("manifest-http-404");
                             return;
                         }
 
                         if (!response.IsSuccessStatusCode)
                         {
-                            _logger.Write(
-                                SafeLogEvent.UpdateCheckFailed,
-                                "manifest-http-" + (int)response.StatusCode,
-                                null);
+                            Fail("manifest-http-" + (int)response.StatusCode);
                             return;
                         }
 
@@ -76,11 +81,16 @@ namespace Krs.AcquiringMonitor.Updates
                     }
 
                     ValidatedUpdate update;
-                    if (!UpdateManifest.TrySelect(
-                            manifestJson,
-                            currentVersion,
-                            out update))
+                    if (!UpdateManifest.TryParse(manifestJson, out update))
                     {
+                        Fail("manifest-format");
+                        return;
+                    }
+                    var normalizedCurrent = new Version(
+                        currentVersion.Major, currentVersion.Minor, Math.Max(0, currentVersion.Build));
+                    if (update.Version.CompareTo(normalizedCurrent) <= 0)
+                    {
+                        Status = "Новых версий нет. Установлена версия " + currentVersion.ToString(3) + ".";
                         _logger.Write(
                             SafeLogEvent.UpdateCheckCompleted,
                             "no-newer-valid-release",
@@ -88,6 +98,7 @@ namespace Krs.AcquiringMonitor.Updates
                         return;
                     }
 
+                    Status = "Скачиваю версию " + update.Version.ToString(3) + "…";
                     string updateDirectory = Path.Combine(
                         Environment.GetFolderPath(
                             Environment.SpecialFolder.LocalApplicationData),
@@ -109,10 +120,7 @@ namespace Krs.AcquiringMonitor.Updates
                         {
                             if (!response.IsSuccessStatusCode)
                             {
-                                _logger.Write(
-                                    SafeLogEvent.UpdateCheckFailed,
-                                    "installer-http-" + (int)response.StatusCode,
-                                    null);
+                                Fail("installer-http-" + (int)response.StatusCode);
                                 return;
                             }
 
@@ -136,15 +144,14 @@ namespace Krs.AcquiringMonitor.Updates
 
                     if (!UpdateManifest.HashMatches(installerPath, update.Sha256))
                     {
-                        _logger.Write(
-                            SafeLogEvent.UpdateCheckFailed,
-                            "installer-hash",
-                            null);
+                        Fail("installer-hash");
                         return;
                     }
                     cancellationToken.ThrowIfCancellationRequested();
                     _installerPath = installerPath;
                     _installerSha256 = update.Sha256;
+                    Status = "Версия " + update.Version.ToString(3) +
+                        " готова. Установка начнётся после 30 секунд без банковских операций, при доступном журнале и закрытых окнах настроек и диагностики.";
                 }
 
                 prepared = true;
@@ -154,24 +161,25 @@ namespace Krs.AcquiringMonitor.Updates
             {
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    _logger.Write(SafeLogEvent.UpdateCheckFailed, "timeout", exception);
+                    Fail("timeout", exception);
                 }
+                else Status = "Проверка отменена при выходе из программы.";
             }
             catch (HttpRequestException exception)
             {
-                _logger.Write(SafeLogEvent.UpdateCheckFailed, "network", exception);
+                Fail("network", exception);
             }
             catch (IOException exception)
             {
-                _logger.Write(SafeLogEvent.UpdateCheckFailed, "file", exception);
+                Fail("file", exception);
             }
             catch (UnauthorizedAccessException exception)
             {
-                _logger.Write(SafeLogEvent.UpdateCheckFailed, "access", exception);
+                Fail("access", exception);
             }
             catch (Exception exception)
             {
-                _logger.Write(SafeLogEvent.UpdateCheckFailed, "unexpected", exception);
+                Fail("unexpected", exception);
             }
             finally
             {
@@ -196,7 +204,7 @@ namespace Krs.AcquiringMonitor.Updates
                 // The download may have waited hours; verify again immediately before execution.
                 if (!UpdateManifest.HashMatches(installerPath, _installerSha256))
                 {
-                    _logger.Write(SafeLogEvent.UpdateCheckFailed, "installer-hash", null);
+                    Fail("installer-hash");
                     return false;
                 }
                 string applicationDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
@@ -217,15 +225,13 @@ namespace Krs.AcquiringMonitor.Updates
                 {
                     if (process == null)
                     {
-                        _logger.Write(
-                            SafeLogEvent.UpdateCheckFailed,
-                            "installer-start",
-                            null);
+                        Fail("installer-start");
                         return false;
                     }
                 }
 
                 started = true;
+                Status = "Установщик запущен, монитор завершает работу.";
                 _logger.Write(
                     SafeLogEvent.UpdateInstallerStarted,
                     "verified",
@@ -234,34 +240,22 @@ namespace Krs.AcquiringMonitor.Updates
             }
             catch (IOException exception)
             {
-                _logger.Write(
-                    SafeLogEvent.UpdateCheckFailed,
-                    "file",
-                    exception);
+                Fail("file", exception);
                 return false;
             }
             catch (UnauthorizedAccessException exception)
             {
-                _logger.Write(
-                    SafeLogEvent.UpdateCheckFailed,
-                    "access",
-                    exception);
+                Fail("access", exception);
                 return false;
             }
             catch (Win32Exception exception)
             {
-                _logger.Write(
-                    SafeLogEvent.UpdateCheckFailed,
-                    "process",
-                    exception);
+                Fail("process", exception);
                 return false;
             }
             catch (Exception exception)
             {
-                _logger.Write(
-                    SafeLogEvent.UpdateCheckFailed,
-                    "unexpected",
-                    exception);
+                Fail("unexpected", exception);
                 return false;
             }
             finally
@@ -271,6 +265,12 @@ namespace Krs.AcquiringMonitor.Updates
                     TryDeleteFile(installerPath);
                 }
             }
+        }
+
+        private void Fail(string code, Exception exception = null)
+        {
+            Status = "Не удалось обновить программу (" + code + "). Текущая версия продолжает работать.";
+            _logger.Write(SafeLogEvent.UpdateCheckFailed, code, exception);
         }
 
         private static void TryDeleteFile(string path)

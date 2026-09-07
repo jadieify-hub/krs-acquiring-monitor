@@ -33,6 +33,11 @@ namespace Krs.AcquiringMonitor.Tests
         public static void RejectsInvalidAndNonNewerManifests()
         {
             ValidatedUpdate update;
+            TestAssert.True(UpdateManifest.TryParse(
+                "{\"version\":\"0.1.0\",\"sha256\":\"" + ValidHash + "\"}", out update),
+                "Текущая корректная версия отличается от повреждённого манифеста.");
+            TestAssert.False(UpdateManifest.TryParse("{broken", out update),
+                "Повреждённый манифест нельзя выдавать за отсутствие обновлений.");
             TestAssert.False(
                 UpdateManifest.TrySelect(
                     "{\"version\":\"0.1.0\",\"sha256\":\"" + ValidHash + "\"}",
@@ -143,6 +148,8 @@ namespace Krs.AcquiringMonitor.Tests
                         "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD");
                 TestAssert.False(updater.TryStartInstaller(), "Изменённый установщик не запускается.");
                 TestAssert.False(updater.HasPreparedUpdate, "Повреждённое обновление снимается с ожидания.");
+                TestAssert.True(updater.Status.Contains("installer-hash"),
+                    "Пользователь должен видеть причину отказа обновления.");
                 TestAssert.True(File.ReadAllText(Path.Combine(directory, "diagnostics.log"))
                     .Contains("installer-hash"), "Причина отказа должна попасть в диагностику.");
             }

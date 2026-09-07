@@ -14,9 +14,9 @@ namespace Krs.AcquiringMonitor.Updates
             _installAfter = now.AddSeconds(30);
         }
 
-        public bool TryBeginCheck(DateTimeOffset now)
+        public bool TryBeginCheck(DateTimeOffset now, bool force = false)
         {
-            if (now < _nextCheck)
+            if (!force && now < _nextCheck)
             {
                 return false;
             }

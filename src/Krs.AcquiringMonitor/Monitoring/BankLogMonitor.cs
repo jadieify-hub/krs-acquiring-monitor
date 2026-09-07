@@ -13,12 +13,19 @@ namespace Krs.AcquiringMonitor.Monitoring
 {
     public sealed class BankLogSnapshotEventArgs : EventArgs
     {
-        public BankLogSnapshotEventArgs(BankLogSnapshot snapshot)
+        public BankLogSnapshotEventArgs(BankLogSnapshot snapshot,
+            string fileName = "", long offset = 0, string prefixHash = "")
         {
             Snapshot = snapshot;
+            FileName = fileName;
+            Offset = offset;
+            PrefixHash = prefixHash;
         }
 
         public BankLogSnapshot Snapshot { get; private set; }
+        public string FileName { get; private set; }
+        public long Offset { get; private set; }
+        public string PrefixHash { get; private set; }
     }
 
     public sealed class BankLogMonitor : IDisposable
@@ -49,7 +56,8 @@ namespace Krs.AcquiringMonitor.Monitoring
         private Timer _timer;
         private long _revision;
         private long _sourceGeneration;
-        private bool _disposed;
+        private volatile bool _disposed;
+        private volatile BankLogSnapshotEventArgs _checkpoint;
 
         public BankLogMonitor(
             string uposDirectory,
@@ -109,11 +117,14 @@ namespace Krs.AcquiringMonitor.Monitoring
             CurrentSnapshot = fallback == null
                 ? BankLogSnapshot.FromTotals(new Dictionary<int, long>(), true)
                 : fallback.AsStale();
+            _checkpoint = new BankLogSnapshotEventArgs(CurrentSnapshot);
         }
 
         public event EventHandler<BankLogSnapshotEventArgs> SnapshotChanged;
 
         public BankLogSnapshot CurrentSnapshot { get; private set; }
+
+        public string ActiveLogFileName { get { return Path.GetFileName(_activePath) ?? string.Empty; } }
 
         public bool HasPendingOperation
         {
@@ -122,10 +133,7 @@ namespace Krs.AcquiringMonitor.Monitoring
 
         public long CaptureRevision()
         {
-            lock (_sync)
-            {
-                return _revision;
-            }
+            return Interlocked.Read(ref _revision);
         }
 
         public BankLogSnapshot CaptureCheckpoint(
@@ -133,30 +141,15 @@ namespace Krs.AcquiringMonitor.Monitoring
             out long activeLogOffset,
             out string activeLogPrefixHash)
         {
-            lock (_sync)
-            {
-                activeLogFileName = string.IsNullOrEmpty(_activePath)
-                    ? string.Empty
-                    : Path.GetFileName(_activePath);
-                activeLogOffset = Math.Max(
-                    0L,
-                    _activeOffset - _partialLine.Length);
-                string hash;
-                activeLogPrefixHash =
-                    !string.IsNullOrEmpty(_activePath) &&
-                    TryComputePrefixHash(
-                        _activePath,
-                        (int)Math.Min(activeLogOffset, IdentityPrefixLength),
-                        out hash)
-                        ? hash
-                        : string.Empty;
-                return CurrentSnapshot;
-            }
+            BankLogSnapshotEventArgs checkpoint = _checkpoint;
+            activeLogFileName = checkpoint.FileName;
+            activeLogOffset = checkpoint.Offset;
+            activeLogPrefixHash = checkpoint.PrefixHash;
+            return checkpoint.Snapshot;
         }
 
         public void Start()
         {
-            RefreshNow();
             lock (_sync)
             {
                 if (_disposed || _timer != null)
@@ -166,27 +159,30 @@ namespace Krs.AcquiringMonitor.Monitoring
 
                 if (Directory.Exists(_directory))
                 {
-                    _watcher = new FileSystemWatcher(_directory, "sbkernel*.log");
-                    _watcher.NotifyFilter =
+                    var watcher = new FileSystemWatcher(_directory, "sbkernel*.log");
+                    watcher.NotifyFilter =
                         NotifyFilters.FileName |
                         NotifyFilters.LastWrite |
                         NotifyFilters.Size;
-                    _watcher.Changed += OnFileChanged;
-                    _watcher.Created += OnFileChanged;
-                    _watcher.Renamed += OnFileRenamed;
-                    _watcher.EnableRaisingEvents = true;
+                    watcher.Changed += OnFileChanged;
+                    watcher.Created += OnFileChanged;
+                    watcher.Renamed += OnFileRenamed;
+                    watcher.EnableRaisingEvents = true;
+                    _watcher = watcher;
                 }
 
                 _timer = new Timer(
                     state => RefreshNow(),
                     null,
-                    TimeSpan.FromSeconds(1),
+                    TimeSpan.Zero,
                     TimeSpan.FromSeconds(1));
+                if (_disposed) Dispose();
             }
         }
 
         public void RefreshNow()
         {
+            if (_disposed) return;
             BankLogSnapshot changed = null;
             lock (_sync)
             {
@@ -238,6 +234,8 @@ namespace Krs.AcquiringMonitor.Monitoring
                         }
                     }
 
+                    if (_disposed) return;
+                    PublishCheckpoint();
                     bool snapshotChanged =
                         !SnapshotEquals(before, CurrentSnapshot);
                     bool activityChanged =
@@ -245,7 +243,7 @@ namespace Krs.AcquiringMonitor.Monitoring
                         sourceGenerationBefore != _sourceGeneration;
                     if (snapshotChanged || activityChanged)
                     {
-                        _revision++;
+                        Interlocked.Increment(ref _revision);
                     }
 
                     if (snapshotChanged)
@@ -258,7 +256,7 @@ namespace Krs.AcquiringMonitor.Monitoring
                     CurrentSnapshot = before.AsStale();
                     if (!SnapshotEquals(before, CurrentSnapshot))
                     {
-                        _revision++;
+                        Interlocked.Increment(ref _revision);
                         changed = CurrentSnapshot;
                     }
                     LogUnavailable(exception);
@@ -268,14 +266,14 @@ namespace Krs.AcquiringMonitor.Monitoring
                     CurrentSnapshot = before.AsStale();
                     if (!SnapshotEquals(before, CurrentSnapshot))
                     {
-                        _revision++;
+                        Interlocked.Increment(ref _revision);
                         changed = CurrentSnapshot;
                     }
                     LogUnavailable(exception);
                 }
             }
 
-            if (changed != null)
+            if (changed != null && !_disposed)
             {
                 EventHandler<BankLogSnapshotEventArgs> handler = SnapshotChanged;
                 if (handler != null)
@@ -301,7 +299,9 @@ namespace Krs.AcquiringMonitor.Monitoring
                 }
 
                 CurrentSnapshot = _parser.Snapshot;
-                _revision++;
+                PublishCheckpoint();
+                if (_disposed) return false;
+                Interlocked.Increment(ref _revision);
                 changed = CurrentSnapshot;
             }
 
@@ -352,27 +352,29 @@ namespace Krs.AcquiringMonitor.Monitoring
 
         public void Dispose()
         {
-            lock (_sync)
+            _disposed = true;
+            Timer timer = Interlocked.Exchange(ref _timer, null);
+            if (timer != null) timer.Dispose();
+            FileSystemWatcher watcher = Interlocked.Exchange(ref _watcher, null);
+            if (watcher != null) watcher.Dispose();
+        }
+
+        private void PublishCheckpoint()
+        {
+            if (_disposed || CurrentSnapshot.IsStale || CurrentSnapshot.HasPendingOperation ||
+                string.IsNullOrEmpty(_activePath)) return;
+
+            long offset = Math.Max(0L, _activeOffset - _partialLine.Length);
+            int prefixLength = (int)Math.Min(offset, IdentityPrefixLength);
+            string hash = _activePrefixHash;
+            if (_activePrefixLength != prefixLength || string.IsNullOrEmpty(hash))
             {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _disposed = true;
-                if (_watcher != null)
-                {
-                    _watcher.EnableRaisingEvents = false;
-                    _watcher.Dispose();
-                    _watcher = null;
-                }
-
-                if (_timer != null)
-                {
-                    _timer.Dispose();
-                    _timer = null;
-                }
+                if (!TryComputePrefixHash(_activePath, prefixLength, out hash)) return;
             }
+            if (_disposed) return;
+            // One reference publishes matching money, offset and hash, including on 32-bit Windows.
+            _checkpoint = new BankLogSnapshotEventArgs(
+                CurrentSnapshot, Path.GetFileName(_activePath), offset, hash);
         }
 
         private string[] GetNewestLogFiles()
@@ -401,7 +403,7 @@ namespace Krs.AcquiringMonitor.Monitoring
             _activePrefixHash = string.Empty;
 
             string[] selected = files.ToArray();
-            for (int index = 0; index < selected.Length; index++)
+            for (int index = 0; index < selected.Length && !_disposed; index++)
             {
                 bool isActive = index == selected.Length - 1;
                 _activePath = selected[index];
@@ -470,7 +472,7 @@ namespace Krs.AcquiringMonitor.Monitoring
             _activePath = files[resumeIndex];
             _activeOffset = _resumeLogOffset;
 
-            for (int index = resumeIndex; index < files.Length; index++)
+            for (int index = resumeIndex; index < files.Length && !_disposed; index++)
             {
                 if (index > resumeIndex)
                 {
@@ -540,10 +542,11 @@ namespace Krs.AcquiringMonitor.Monitoring
                 _partialLine = string.Empty;
 
                 int read;
-                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                while (!_disposed && (read = stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
                     text.Append(Encoding.ASCII.GetString(buffer, 0, read));
                 }
+                if (_disposed) return;
 
                 _activeOffset = stream.Position;
                 string[] lines = text.ToString().Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -556,10 +559,11 @@ namespace Krs.AcquiringMonitor.Monitoring
 
                 for (int index = 0; index < completeCount; index++)
                 {
+                    if (_disposed) return;
                     _parser.ProcessLine(lines[index]);
                 }
 
-                UpdateActiveIdentity();
+                if (!_disposed) UpdateActiveIdentity();
             }
         }
 
@@ -590,6 +594,11 @@ namespace Krs.AcquiringMonitor.Monitoring
             {
                 _activePrefixLength = length;
                 _activePrefixHash = hash;
+            }
+            else
+            {
+                _activePrefixLength = 0;
+                _activePrefixHash = string.Empty;
             }
         }
 
@@ -649,11 +658,13 @@ namespace Krs.AcquiringMonitor.Monitoring
 
         private void OnFileChanged(object sender, FileSystemEventArgs eventArgs)
         {
+            if (_disposed) return;
             ThreadPool.QueueUserWorkItem(state => RefreshNow());
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs eventArgs)
         {
+            if (_disposed) return;
             ThreadPool.QueueUserWorkItem(state => RefreshNow());
         }
 

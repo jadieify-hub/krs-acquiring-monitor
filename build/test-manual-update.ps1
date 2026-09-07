@@ -7,10 +7,11 @@ $TargetDirectory = Join-Path $ProbeRoot "installed"
 New-Item -ItemType Directory -Path $TargetDirectory -Force | Out-Null
 $Utf8 = [Text.UTF8Encoding]::new($true)
 
-# Reproduce older releases: a hidden window and an ApplicationContext without MainForm.
+# Exercise the monitor's hidden-owner lifecycle without a MainForm.
 # This client has no monitor, settings, autostart, banking code, or network access.
 $ClientSource = @'
 using System;
+using System.IO;
 using System.Windows.Forms;
 using System.Reflection;
 [assembly: AssemblyVersion("0.0.VERSION.0")]
@@ -20,9 +21,11 @@ internal static class Client {
         using (var context = new ApplicationContext())
         using (var timeout = new Timer { Interval = 90000 }) {
             IntPtr handle = form.Handle;
+            form.HandleDestroyed += delegate { if (!form.RecreatingHandle) context.ExitThread(); };
             timeout.Tick += delegate { context.ExitThread(); };
             timeout.Start();
             Application.Run(context);
+            File.WriteAllText(Application.ExecutablePath + ".closed", "graceful");
         }
     }
 }
@@ -70,20 +73,23 @@ try {
     # Give both clients time to create their hidden windows.
     Start-Sleep -Milliseconds 750
     $Installer = Start-Process -FilePath (Join-Path $ProbeRoot "manual-update-probe.exe") -ArgumentList @(
-        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/NOFORCECLOSEAPPLICATIONS",
         ('/LOG="' + (Join-Path $ProbeRoot "installer.log") + '"')
     ) -PassThru -WindowStyle Hidden
-    if (-not $Installer.WaitForExit(60000)) { throw "Manual installer hung." }
+    if (-not $Installer.WaitForExit(15000)) { throw "Manual installer hung." }
     $Installer.Refresh()
     if ($UnrelatedProcess.HasExited) { throw "Installer stopped an unrelated process." }
     if ($Installer.ExitCode -ne 0 -or -not $OldProcess.HasExited) {
         throw "Old hidden process was not closed; installer exit=$($Installer.ExitCode). Logs: $ProbeRoot"
     }
+    if (-not (Test-Path -LiteralPath ($TargetExe + ".closed"))) {
+        throw "Process was terminated without leaving its message loop normally."
+    }
     if ((Get-FileHash -LiteralPath $TargetExe).Hash -ne
         (Get-FileHash -LiteralPath (Join-Path $ProbeRoot "client-2.exe")).Hash) {
         throw "Installer did not replace the running old executable."
     }
-    Write-Output "PASS: old hidden process exited, file replaced, unrelated process remains alive."
+    Write-Output "PASS: hidden process exited gracefully without force, file replaced, unrelated process remains alive."
 }
 finally {
     foreach ($Process in @($Installer, $OldProcess, $UnrelatedProcess)) {

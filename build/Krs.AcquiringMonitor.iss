@@ -1,6 +1,6 @@
 #define MyAppName "KRS Эквайринг Монитор"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.9"
+  #define MyAppVersion "0.2.11"
 #endif
 #define MyAppPublisher "KRS"
 #define MyAppExeName "Krs.AcquiringMonitor.exe"
@@ -21,6 +21,7 @@ OutputBaseFilename=KRS-AcquiringMonitor-{#MyAppVersion}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\src\Krs.AcquiringMonitor\Assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Установщик {#MyAppName}

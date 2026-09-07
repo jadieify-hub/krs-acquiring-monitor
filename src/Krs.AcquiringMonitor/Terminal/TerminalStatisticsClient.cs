@@ -183,7 +183,7 @@ namespace Krs.AcquiringMonitor.Terminal
 
             if (process != null)
             {
-                TryKill(process);
+                TryKill(process, false);
             }
 
             TryDeleteFile(outputPath);
@@ -272,14 +272,14 @@ namespace Krs.AcquiringMonitor.Terminal
             return quoted.ToString();
         }
 
-        private static void TryKill(Process process)
+        private static void TryKill(Process process, bool waitForExit = true)
         {
             try
             {
                 if (!process.HasExited)
                 {
                     process.Kill();
-                    process.WaitForExit(5000);
+                    if (waitForExit) process.WaitForExit(5000);
                 }
             }
             catch (InvalidOperationException)
