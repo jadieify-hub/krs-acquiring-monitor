@@ -70,7 +70,7 @@ AMessage[16]:        нули
 
 ### Установщик — рекомендуется
 
-1. Скачайте [KRS-AcquiringMonitor-0.2.11-setup.exe](https://github.com/jadieify-hub/krs-acquiring-monitor/releases/download/v0.2.11/KRS-AcquiringMonitor-0.2.11-setup.exe) из официального GitHub Release. Перед установкой поверх старой версии завершите монитор через меню трея.
+1. Скачайте [KRS-AcquiringMonitor-0.2.12-setup.exe](https://github.com/jadieify-hub/krs-acquiring-monitor/releases/download/v0.2.12/KRS-AcquiringMonitor-0.2.12-setup.exe) из официального GitHub Release. Перед установкой поверх старой версии завершите монитор через меню трея.
 2. Запустите установщик от обычной учётной записи; права администратора не требуются.
 3. После установки программа стартует сама и по умолчанию добавляет себя в автозапуск текущего пользователя.
 4. При первом запуске выберите существующую папку UPOS/SC552.
@@ -79,7 +79,7 @@ AMessage[16]:        нули
 
 ### Portable
 
-1. Скачайте [KRS-AcquiringMonitor-0.2.11-win-x86.zip](https://github.com/jadieify-hub/krs-acquiring-monitor/releases/download/v0.2.11/KRS-AcquiringMonitor-0.2.11-win-x86.zip) из официального GitHub Release.
+1. Скачайте [KRS-AcquiringMonitor-0.2.12-win-x86.zip](https://github.com/jadieify-hub/krs-acquiring-monitor/releases/download/v0.2.12/KRS-AcquiringMonitor-0.2.12-win-x86.zip) из официального GitHub Release.
 2. Распакуйте его в отдельную папку, доступную обычному пользователю.
 3. Запустите Krs.AcquiringMonitor.exe.
 4. При первом запуске выберите существующую папку UPOS/SC552.
@@ -227,7 +227,7 @@ pilot_nt.dll, pinpad.ini и остальные файлы Сбербанка о�
 
 Установленную версию удаляйте через «Приложения» Windows — деинсталлятор также уберёт запись автозапуска. Для portable-версии сначала снимите «Запускать вместе с Windows» в настройках и завершите приложение через трей, затем удалите распакованную папку. Пользовательские настройки при необходимости удаляются отдельно из `%LOCALAPPDATA%\KRS\AcquiringMonitor`.
 
-## Известные ограничения 0.2.11
+## Известные ограничения
 
 - поддерживается только Сбербанк UPOS/pilot_nt.dll;
 - класс главного окна `TfrmMain` и блокировка при визуальном поиске подтверждены на Frontol 6.28.8.87; интерфейс с другим классом главного окна потребует диагностики и пока не покажет оверлей вне настроек. Проверка готового выпуска на обоих используемых интерфейсах касс, включая загрузочные окна и возврат после настроек, пока не подтверждена;
@@ -246,7 +246,7 @@ pilot_nt.dll, pinpad.ini и остальные файлы Сбербанка о�
 ~~~powershell
 dotnet build Krs.AcquiringMonitor.sln -c Release -p:Platform=x86
 dotnet run --project tests/Krs.AcquiringMonitor.Tests/Krs.AcquiringMonitor.Tests.csproj -c Release -p:Platform=x86
-powershell -NoProfile -ExecutionPolicy Bypass -File build/build-release.ps1 -Version 0.2.11
+powershell -NoProfile -ExecutionPolicy Bypass -File build/build-release.ps1 -Version 0.2.12
 ~~~
 
 Для полного релиза нужен Inno Setup 6. Скрипт запускает тесты, собирает x86 Release и создаёт в `artifacts` portable-архив, установщик и двухпольный `update.json` с SHA-256.
