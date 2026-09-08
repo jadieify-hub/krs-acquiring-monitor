@@ -32,7 +32,6 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
         private PendingOperation _pendingOperation;
         private bool _pendingClose;
         private bool _closeResultIsFinancial;
-        private int _successfulCloses;
         private bool _isStale;
 
         public BankLogParser()
@@ -90,7 +89,6 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
                     ParseInt(start.Groups["type"].Value),
                     ParseLong(start.Groups["amount"].Value));
                 _pendingClose = false;
-                _successfulCloses = 0;
                 return;
             }
 
@@ -145,8 +143,7 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             if (totals == null ||
                 totals.Count < 1 ||
                 totals.Count > 2 ||
-                HasPendingOperation ||
-                _successfulCloses > 0)
+                HasPendingOperation)
             {
                 return false;
             }
@@ -181,7 +178,6 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
                 _totals.Add(item.Key, item.Value);
             }
 
-            _successfulCloses = 0;
             _isStale = false;
             return true;
         }
@@ -212,26 +208,16 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
 
             if (result != 0 || !IsSuccessCode(responseCode))
             {
-                _isStale = _successfulCloses > 0;
                 return;
             }
 
-            int requiredCloses = Math.Max(
-                _totals.Count,
-                _expectedDepartments.Count);
-            if (requiredCloses == 0)
+            if (_totals.Count == 0 && _expectedDepartments.Count == 0)
             {
                 _isStale = true;
                 return;
             }
 
-            _successfulCloses++;
-            if (_successfulCloses < requiredCloses)
-            {
-                _isStale = true;
-                return;
-            }
-
+            // UPOS settlement (6000) closes all departments in one successful call.
             var departments = new HashSet<int>(_expectedDepartments);
             foreach (int department in _totals.Keys)
             {
@@ -243,7 +229,6 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
                 _totals[department] = 0L;
             }
 
-            _successfulCloses = 0;
             _isStale = false;
         }
 

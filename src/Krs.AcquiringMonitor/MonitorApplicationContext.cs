@@ -474,7 +474,7 @@ namespace Krs.AcquiringMonitor
         {
             return _logMonitor != null && _logMonitor.HasPendingOperation
                 ? "Запрос принят. В журнале UPOS ещё не завершена банковская операция. Итоги обновятся после её завершения."
-                : "Запрос принят. Журнал UPOS недоступен или закрытие смены завершено не для всех отделов. Запрос выполнится после восстановления журнала.";
+                : "Запрос принят. Журнал UPOS недоступен или данные ещё не восстановлены. Запрос выполнится после восстановления журнала.";
         }
 
         private void SetRefreshResult(string title, string message, bool failed)

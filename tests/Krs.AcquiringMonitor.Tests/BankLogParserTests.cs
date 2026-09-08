@@ -70,32 +70,25 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.False(parser.Snapshot.IsStale, "Полное закрытие одной организации должно дать актуальный ноль.");
         }
 
-        public static void TwoDepartmentsWaitForSecondClose()
+        public static void OneSettlementResetsAllDepartments()
         {
             var parser = ParserWithTwoDepartments();
 
             Close(parser, true);
-            TestAssert.Equal(10000L, parser.Snapshot.Totals[1]);
-            TestAssert.Equal(20000L, parser.Snapshot.Totals[2]);
-            TestAssert.True(parser.Snapshot.IsStale, "После первого из двух закрытий состояние должно быть помечено устаревшим.");
+            TestAssert.Equal(0L, parser.Snapshot.Totals[1]);
+            TestAssert.Equal(0L, parser.Snapshot.Totals[2]);
+            TestAssert.False(parser.Snapshot.IsStale, "Одна успешная сверка закрывает все организации.");
 
             Close(parser, true);
             TestAssert.Equal(0L, parser.Snapshot.Totals[1]);
             TestAssert.Equal(0L, parser.Snapshot.Totals[2]);
-            TestAssert.False(parser.Snapshot.IsStale, "После полного закрытия нули должны быть актуальными.");
+            TestAssert.False(parser.Snapshot.IsStale, "Повторная пустая сверка не меняет актуальные нули.");
         }
 
-        public static void ConfiguredSecondDepartmentWithoutTransactionsStillNeedsSecondClose()
+        public static void SettlementResetsConfiguredDepartmentWithoutTransactions()
         {
             var parser = new BankLogParser(new[] { 1, 2 });
             Purchase(parser, 1, 10000, true);
-
-            Close(parser, true);
-
-            TestAssert.Equal(10000L, parser.Snapshot.Totals[1]);
-            TestAssert.True(
-                parser.Snapshot.IsStale,
-                "Первое из двух ожидаемых закрытий не должно обнулять смену.");
 
             Close(parser, true);
 
@@ -103,19 +96,18 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.Equal(0L, parser.Snapshot.Totals[2]);
             TestAssert.False(
                 parser.Snapshot.IsStale,
-                "Два успешных закрытия должны обнулить оба ожидаемых отдела.");
+                "Одна сверка обнуляет и настроенный отдел без операций.");
         }
 
-        public static void IncompleteCloseKeepsTotalsStale()
+        public static void FailedSettlementKeepsTotals()
         {
             var parser = ParserWithTwoDepartments();
 
-            Close(parser, true);
             Close(parser, false);
 
             TestAssert.Equal(10000L, parser.Snapshot.Totals[1]);
             TestAssert.Equal(20000L, parser.Snapshot.Totals[2]);
-            TestAssert.True(parser.Snapshot.IsStale, "Неуспешное второе закрытие не должно обнулять смену.");
+            TestAssert.False(parser.HasPendingOperation, "Ошибка завершает запрос, но не обнуляет суммы.");
         }
 
         public static void AuthoritativeSnapshotBecomesNewBaseline()
@@ -154,10 +146,10 @@ namespace Krs.AcquiringMonitor.Tests
             TestAssert.Equal(25000L, parser.Snapshot.Totals[2]);
         }
 
-        public static void AuthoritativeSnapshotIsRejectedBetweenDepartmentCloses()
+        public static void AuthoritativeSnapshotIsRejectedDuringSettlement()
         {
             var parser = ParserWithTwoDepartments();
-            Close(parser, true);
+            parser.ProcessLine("04.09 21:50:35.647 SBKRNL: Command = 6000");
 
             bool replaced = parser.TryReplaceTotals(
                 new System.Collections.Generic.Dictionary<int, long>
@@ -165,11 +157,11 @@ namespace Krs.AcquiringMonitor.Tests
                     { 1, 10000L },
                     { 2, 20000L }
                 });
-            Close(parser, true);
+            parser.ProcessLine("04.09 21:50:42.030 PILOT: close_day: result=0, RC=0");
 
             TestAssert.False(
                 replaced,
-                "Ручная сверка не должна сбрасывать прогресс общего закрытия.");
+                "Отчёт не должен заменять суммы во время незавершённой сверки.");
             TestAssert.Equal(0L, parser.Snapshot.Totals[1]);
             TestAssert.Equal(0L, parser.Snapshot.Totals[2]);
         }

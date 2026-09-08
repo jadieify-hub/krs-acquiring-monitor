@@ -345,7 +345,7 @@ namespace Krs.AcquiringMonitor.Tests
             }
         }
 
-        public static void RestartBetweenDepartmentClosesCompletesReset()
+        public static void RestartFromPreSettlementCheckpointUsesNewShiftTotals()
         {
             using (var directory = new TemporaryDirectory())
             {
@@ -366,15 +366,11 @@ namespace Krs.AcquiringMonitor.Tests
                         out checkpointFile,
                         out checkpointOffset,
                         out checkpointHash);
-
-                    File.AppendAllText(logPath, SuccessfulClose());
-                    monitor.RefreshNow();
-                    TestAssert.False(
-                        RuntimeState.CanPersistSnapshot(monitor.CurrentSnapshot),
-                        "Первое из двух закрытий не должно затирать предыдущую контрольную точку.");
                 }
 
-                File.AppendAllText(logPath, SuccessfulClose());
+                // 0.2.11 kept this checkpoint because it waited for a second settlement.
+                File.AppendAllText(logPath, SuccessfulClose() +
+                    SuccessfulPurchase(1, 5000) + SuccessfulPurchase(2, 7000));
                 using (var restarted = new BankLogMonitor(
                     directory.Path,
                     checkpoint,
@@ -385,11 +381,24 @@ namespace Krs.AcquiringMonitor.Tests
                 {
                     restarted.RefreshNow();
 
-                    TestAssert.Equal(0L, restarted.CurrentSnapshot.Totals[1]);
-                    TestAssert.Equal(0L, restarted.CurrentSnapshot.Totals[2]);
+                    TestAssert.Equal(5000L, restarted.CurrentSnapshot.Totals[1]);
+                    TestAssert.Equal(7000L, restarted.CurrentSnapshot.Totals[2]);
                     TestAssert.False(
                         restarted.CurrentSnapshot.IsStale,
-                        "После второго закрытия обе организации должны быть обнулены.");
+                        "Старая контрольная точка восстанавливается через одну сверку без ручного сброса.");
+                    checkpoint = restarted.CaptureCheckpoint(
+                        out checkpointFile, out checkpointOffset, out checkpointHash);
+                    TestAssert.Equal(new FileInfo(logPath).Length, checkpointOffset);
+                }
+
+                File.AppendAllText(logPath, SuccessfulPurchase(1, 2000));
+                using (var restarted = new BankLogMonitor(
+                    directory.Path, checkpoint, null,
+                    checkpointFile, checkpointOffset, checkpointHash))
+                {
+                    restarted.RefreshNow();
+                    TestAssert.Equal(7000L, restarted.CurrentSnapshot.Totals[1]);
+                    TestAssert.Equal(7000L, restarted.CurrentSnapshot.Totals[2]);
                 }
             }
         }

@@ -33,13 +33,13 @@ namespace Krs.AcquiringMonitor.Tests
             Run("ошибка банка не меняет итог", BankLogParserTests.FailedTransactionIsIgnored);
             Run("незавершённая операция остаётся ожидающей", BankLogParserTests.IncompleteTransactionStaysPending);
             Run("одна организация обнуляется одним закрытием", BankLogParserTests.OneDepartmentCloseResets);
-            Run("две организации ждут второе закрытие", BankLogParserTests.TwoDepartmentsWaitForSecondClose);
-            Run("отдел без операций всё равно ждёт закрытия", BankLogParserTests.ConfiguredSecondDepartmentWithoutTransactionsStillNeedsSecondClose);
-            Run("неполное закрытие сохраняет суммы", BankLogParserTests.IncompleteCloseKeepsTotalsStale);
+            Run("одна сверка обнуляет все организации", BankLogParserTests.OneSettlementResetsAllDepartments);
+            Run("общая сверка обнуляет и отдел без операций", BankLogParserTests.SettlementResetsConfiguredDepartmentWithoutTransactions);
+            Run("неуспешная сверка сохраняет суммы", BankLogParserTests.FailedSettlementKeepsTotals);
             Run("статистика не завершает прерванное закрытие", BankLogParserTests.StatisticsDoesNotCompleteInterruptedClose);
             Run("ручной снимок становится новой базой", BankLogParserTests.AuthoritativeSnapshotBecomesNewBaseline);
             Run("полный снимок добавляет второй отдел", BankLogParserTests.AuthoritativeSnapshotCanAddSecondDepartment);
-            Run("сверка между закрытиями отклоняется", BankLogParserTests.AuthoritativeSnapshotIsRejectedBetweenDepartmentCloses);
+            Run("отчёт во время незавершённой сверки отклоняется", BankLogParserTests.AuthoritativeSnapshotIsRejectedDuringSettlement);
             Run("сокращается имя ИП", StatisticsReportParserTests.ShortensEntrepreneurName);
             Run("сокращается имя ООО", StatisticsReportParserTests.ShortensCompanyName);
             Run("разбирается итог одной организации", StatisticsReportParserTests.ParsesSingleOrganizationTotal);
@@ -75,7 +75,7 @@ namespace Krs.AcquiringMonitor.Tests
             Run("ручная база продолжается с сохранённой позиции", MonthRolloverTests.ManualSnapshotResumesFromSavedOffset);
             Run("выход не ждёт читателя и сохраняет безопасную базу", MonitorShutdownTests.ShutdownKeepsSafeCheckpointWithoutWaitingForReader);
             Run("скрытый оверлей принимает системное закрытие", MonitorShutdownTests.HiddenOverlayHandlesSessionShutdown);
-            Run("перезапуск между закрытиями завершает обнуление", MonthRolloverTests.RestartBetweenDepartmentClosesCompletesReset);
+            Run("перезапуск со старой базой учитывает одну общую сверку", MonthRolloverTests.RestartFromPreSettlementCheckpointUsesNewShiftTotals);
             Run("состояние привязано к каталогу UPOS", MonthRolloverTests.RuntimeStateIsBoundToUposDirectory);
             Run("исчезновение активного журнала не повторяет старый месяц", MonthRolloverTests.MissingActiveLogKeepsLastSnapshotStale);
             Run("заменённый активный журнал перечитывается", MonthRolloverTests.ReplacedActiveLogIsRebuilt);
