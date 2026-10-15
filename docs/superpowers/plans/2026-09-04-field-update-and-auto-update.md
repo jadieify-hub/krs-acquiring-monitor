@@ -168,7 +168,7 @@ KRS-AcquiringMonitor-<version>-setup.exe
 https://github.com/jadieify-hub/krs-acquiring-monitor/releases/download/v<version>/<filename>
 ```
 
-Only run the startup check when `unins000.exe` exists beside the application. Fetch `releases/latest/download/update.json` asynchronously with a short manifest timeout, download to `%LOCALAPPDATA%\KRS\AcquiringMonitor\updates`, verify SHA-256, start Inno with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /SP-`, and return true. Treat 404, cancellation and every recoverable network/file/process error as no update while logging only event code and safe detail.
+Only run the startup check when `unins000.exe` exists beside the application. Fetch `releases/latest/download/update.json` asynchronously with a short manifest timeout, download to `%LOCALAPPDATA%\KRS\AcquiringMonitor\updates`, verify SHA-256, start Inno with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /SP-` (shipped as `/NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS` plus `/WAITPID=`; see amendment item 15), and return true. Treat 404, cancellation and every recoverable network/file/process error as no update while logging only event code and safe detail.
 
 Start the check once from a one-shot WinForms timer after the UI message loop begins. If it returns true, exit the application context. Derive `AppConstants.Version` and `ApplicationVersion` from the executing assembly.
 

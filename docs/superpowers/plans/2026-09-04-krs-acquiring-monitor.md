@@ -111,7 +111,7 @@ private static readonly Regex ResultPattern = new Regex(
     RegexOptions.Compiled | RegexOptions.CultureInvariant);
 ~~~
 
-Track one pending operation because UPOS serializes terminal work. Commit an amount only for result 0 and RC 0/00. Track successful close_day calls by count; clear all totals only when the count reaches the number of departments already observed. Any card operation resets an incomplete close counter.
+Track one pending operation because UPOS serializes terminal work. Commit an amount only for result 0 and RC 0/00. Track successful close_day calls by count; clear all totals only when the count reaches the number of departments already observed. (Shipped differently: one successful close clears every department — see amendment item 14.) Any card operation resets an incomplete close counter.
 
 - [x] **Step 4: Run tests**
 

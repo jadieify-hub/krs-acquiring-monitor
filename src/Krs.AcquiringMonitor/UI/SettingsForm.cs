@@ -14,6 +14,7 @@ namespace Krs.AcquiringMonitor.UI
         private readonly CheckBox _autoStartCheckBox;
         private readonly OverlayForm _preview;
         private readonly NumericUpDown _widthEditor;
+        private readonly int _initialWidth;
         private readonly NumericUpDown _fontSizeEditor;
         private readonly ComboBox _fontFamilyEditor;
         private readonly CheckBox _namesBoldEditor;
@@ -157,8 +158,9 @@ namespace Krs.AcquiringMonitor.UI
                 Minimum = AppSettings.MinimumOverlayWidth,
                 Maximum = AppSettings.MaximumOverlayWidth,
                 Increment = 10,
-                Value = AppSettings.NormalizeOverlayWidth(settings.OverlayWidth)
+                Value = AppSettings.NormalizeOverlayWidth(preview.PreferredWidth)
             };
+            _initialWidth = (int)_widthEditor.Value;
             Controls.Add(_widthEditor);
             Controls.Add(new Label
             {
@@ -204,7 +206,7 @@ namespace Krs.AcquiringMonitor.UI
                 AppSettings.NormalizeOverlayColor(settings.OverlayAttentionColorArgb, AppSettings.DefaultOverlayAttentionColor));
             Controls.Add(new Label
             {
-                Text = "Шрифт и цвета видны сразу. Перетаскивайте название или правый край.\r\n«Отмена» вернёт прежний вид и положение.",
+                Text = "Шрифт и цвета видны сразу. Перетаскивайте название, чтобы передвинуть оверлей.\r\n«Отмена» вернёт прежний вид и положение.",
                 Left = 18, Top = 395, Width = 574, Height = 40,
                 ForeColor = Color.DimGray
             });
@@ -213,7 +215,6 @@ namespace Krs.AcquiringMonitor.UI
             _fontFamilyEditor.SelectedIndexChanged += PreviewAppearance;
             _namesBoldEditor.CheckedChanged += PreviewAppearance;
             _amountsBoldEditor.CheckedChanged += PreviewAppearance;
-            _preview.PositionCommitted += PreviewPositionCommitted;
 
             _autoStartCheckBox = new CheckBox
             {
@@ -257,7 +258,6 @@ namespace Krs.AcquiringMonitor.UI
         {
             if (disposing)
             {
-                _preview.PositionCommitted -= PreviewPositionCommitted;
                 if (!_preview.IsDisposed)
                 {
                     _preview.SetTypography(_settings.OverlayFontFamily, _settings.OverlayNamesBold,
@@ -311,12 +311,11 @@ namespace Krs.AcquiringMonitor.UI
         {
             _preview.SetTypography((string)_fontFamilyEditor.SelectedItem,
                 _namesBoldEditor.Checked, _amountsBoldEditor.Checked);
+            if ((int)_widthEditor.Value != _initialWidth)
+            {
+                _preview.SetAutoWidth(false);
+            }
             _preview.SetAppearance((int)_widthEditor.Value, (float)_fontSizeEditor.Value);
-        }
-
-        private void PreviewPositionCommitted(object sender, EventArgs eventArgs)
-        {
-            _widthEditor.Value = _preview.PreferredWidth;
         }
 
         private void BrowseDirectory(object sender, EventArgs eventArgs)
@@ -340,6 +339,10 @@ namespace Krs.AcquiringMonitor.UI
             _settings.UposDirectory = _directoryTextBox.Text.Trim();
             _settings.AutoStart = _autoStartCheckBox.Checked;
             _settings.OverlayWidth = (int)_widthEditor.Value;
+            if ((int)_widthEditor.Value != _initialWidth)
+            {
+                _settings.OverlayWidthIsManual = true;
+            }
             _settings.OverlayFontSize = (float)_fontSizeEditor.Value;
             _settings.OverlayFontFamily = (string)_fontFamilyEditor.SelectedItem;
             _settings.OverlayNamesBold = _namesBoldEditor.Checked;

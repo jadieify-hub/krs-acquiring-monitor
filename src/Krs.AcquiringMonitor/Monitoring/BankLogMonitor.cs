@@ -364,6 +364,9 @@ namespace Krs.AcquiringMonitor.Monitoring
             if (_disposed || CurrentSnapshot.IsStale || CurrentSnapshot.HasPendingOperation ||
                 string.IsNullOrEmpty(_activePath)) return;
 
+            // _partialLine is counted in characters and _activeOffset in bytes. They are
+            // interchangeable only because the journal is read as ASCII, one byte per
+            // character; changing that encoding would shift every saved checkpoint.
             long offset = Math.Max(0L, _activeOffset - _partialLine.Length);
             int prefixLength = (int)Math.Min(offset, IdentityPrefixLength);
             string hash = _activePrefixHash;
@@ -544,6 +547,8 @@ namespace Krs.AcquiringMonitor.Monitoring
                 int read;
                 while (!_disposed && (read = stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
+                    // One byte per character on purpose: PublishCheckpoint subtracts the
+                    // carried-over characters from a byte offset.
                     text.Append(Encoding.ASCII.GetString(buffer, 0, read));
                 }
                 if (_disposed) return;

@@ -177,9 +177,13 @@ namespace Krs.AcquiringMonitor.Tests
             parser.ProcessLine("01.09 10:02:00.010 SBKRNL: Command = 7000");
             parser.ProcessLine("01.09 10:02:00.100 PILOT: close_day: result=0, RC=0");
             TestAssert.Equal(10000L, parser.Snapshot.Totals[1]);
-            TestAssert.True(parser.HasPendingOperation,
-                "Успешная статистика не подтверждает прерванное закрытие смены.");
             TestAssert.Equal(revision, parser.ActivityVersion);
+            // Статистика не подтверждает сверку (суммы остались), но и не оставляет
+            // монитор в состоянии ожидания: терминал ответил и снова свободен.
+            TestAssert.False(parser.HasPendingOperation,
+                "Завершённая статистика не должна блокировать обновление и отчёты.");
+            parser.ProcessLine("01.09 10:03:00.000 PILOT: close_day: result=0, RC=0");
+            TestAssert.Equal(10000L, parser.Snapshot.Totals[1]);
         }
 
         private static BankLogParser ParserWithTwoDepartments()
@@ -204,6 +208,52 @@ namespace Krs.AcquiringMonitor.Tests
                 successful
                     ? "04.09 10:00:05.000 PILOT: card_authorize14: result=0, RC=0, cheque=Yes, vas=0"
                     : "04.09 10:00:05.000 PILOT: card_authorize14: result=4451, RC=51, cheque=No, vas=0");
+        }
+
+        public static void CorruptedLineIsSkippedWithoutThrowing()
+        {
+            var parser = new BankLogParser();
+            Purchase(parser, 1, 10500, true);
+
+            // Digit runs no int or long can hold: the old code threw out of the monitor timer.
+            parser.ProcessLine(
+                "04.09 10:10:00.000 PILOT: card_authorize14: track2=(null), TRType=1, CType=0, " +
+                "Amount=999999999999999999999999999999");
+            parser.ProcessLine(
+                "04.09 10:10:00.010 SBKRNL: Command = 4000, Amount = 0.00, Department = 99999999999999999999");
+            parser.ProcessLine("04.09 10:10:05.000 PILOT: card_authorize14: result=0, RC=0, cheque=Yes, vas=0");
+
+            TestAssert.Equal(10500L, parser.Snapshot.Totals[1]);
+            TestAssert.False(parser.HasPendingOperation,
+                "Нечитаемая строка не должна оставлять операцию ожидающей.");
+        }
+
+        public static void UnreadableResultDoesNotBlockTheMonitor()
+        {
+            var parser = new BankLogParser();
+
+            parser.ProcessLine(
+                "04.09 11:00:00.000 PILOT: card_authorize14: track2=(null), TRType=1, CType=0, Amount=7000");
+            parser.ProcessLine("04.09 11:00:00.010 SBKRNL: Command = 4000, Amount = 70.00, Department = 1");
+            parser.ProcessLine(
+                "04.09 11:00:05.000 PILOT: card_authorize14: result=99999999999999999999, RC=0");
+
+            TestAssert.False(parser.HasPendingOperation,
+                "Нечитаемый результат не должен блокировать обновление и установку до конца смены.");
+            TestAssert.Equal(0L, parser.Snapshot.Totals[1]);
+        }
+
+        public static void AbsurdAmountCannotOverflowTheTotal()
+        {
+            var parser = new BankLogParser();
+            Purchase(parser, 1, long.MaxValue, true);
+            TestAssert.Equal(long.MaxValue, parser.Snapshot.Totals[1]);
+
+            Purchase(parser, 1, long.MaxValue, true);
+
+            TestAssert.Equal(long.MaxValue, parser.Snapshot.Totals[1]);
+            TestAssert.False(parser.HasPendingOperation,
+                "Отброшенная из-за переполнения сумма не должна оставлять операцию ожидающей.");
         }
 
         private static void Close(BankLogParser parser, bool successful)

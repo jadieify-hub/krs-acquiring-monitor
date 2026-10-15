@@ -50,7 +50,7 @@ namespace Krs.AcquiringMonitor.Tests
             }
         }
 
-        public static void CustomColorsSurviveRefreshAndResize()
+        public static void CustomColorsSurviveRefreshAndWidthChange()
         {
             using (Form overlay = CreateOverlay())
             {
@@ -74,7 +74,6 @@ namespace Krs.AcquiringMonitor.Tests
                 TestAssert.Equal(Color.DarkRed.ToArgb(), overlay.Controls[1].ForeColor.ToArgb());
                 TestAssert.Equal(Color.DarkRed.ToArgb(), overlay.Controls[3].ForeColor.ToArgb());
                 TestAssert.Equal(Color.Black.ToArgb(), overlay.Controls[0].ForeColor.ToArgb());
-                TestAssert.Equal(Color.Black.ToArgb(), overlay.Controls[4].ForeColor.ToArgb());
                 overlay.GetType().GetMethod("SetRefreshStatus").Invoke(overlay,
                     new object[] { "", false });
                 TestAssert.Equal(Color.Black.ToArgb(), overlay.Controls[1].ForeColor.ToArgb());
@@ -170,12 +169,10 @@ namespace Krs.AcquiringMonitor.Tests
             using (Form overlay = CreateOverlay())
             {
                 MethodInfo setAppearance = overlay.GetType().GetMethod("SetAppearance");
+                overlay.GetType().GetMethod("SetAutoWidth").Invoke(overlay, new object[] { false });
                 float fontSize = overlay.Controls[0].Font.Size;
-                var grip = overlay.Controls[overlay.Controls.Count - 1];
                 int originalWidth = overlay.Width;
-                Mouse(grip, "OnMouseDown", 5);
-                Mouse(grip, "OnMouseMove", 125);
-                Mouse(grip, "OnMouseUp", 5);
+                setAppearance.Invoke(overlay, new object[] { originalWidth + 120, fontSize });
                 TestAssert.Equal(originalWidth + 120, overlay.Width);
                 TestAssert.Equal(fontSize, overlay.Controls[0].Font.Size);
                 setAppearance.Invoke(overlay, new object[] { 350, fontSize });
@@ -184,21 +181,89 @@ namespace Krs.AcquiringMonitor.Tests
                 TestAssert.True(overlay.Controls[0].Right <= overlay.Controls[1].Left,
                     "Название не перекрывает сумму при сужении.");
                 setAppearance.Invoke(overlay, new object[] { 650, AppSettings.MaximumOverlayFontSize });
-                using (Graphics graphics = overlay.CreateGraphics())
-                {
-                    TestAssert.True(graphics.MeasureString(grip.Text, grip.Font).Width <= grip.Width,
-                        "Край изменения ширины остаётся целым при максимальном шрифте.");
-                }
                 setAppearance.Invoke(overlay, new object[] { 250, 13f });
                 TestAssert.Equal(250, overlay.Width);
                 using (Graphics graphics = overlay.CreateGraphics())
                 {
                     Control amount = overlay.Controls[1];
                     float textRight = amount.Left + graphics.MeasureString(amount.Text, amount.Font).Width;
-                    TestAssert.True(grip.Left - textRight <= 12 * graphics.DpiX / 96f,
+                    TestAssert.True(overlay.Width - textRight <= 26 * graphics.DpiX / 96f,
                         "После суммы нет пустой колонки или отдельной кнопки обновления.");
                 }
             }
+        }
+
+        public static void AutoWidthFitsLongestNameWithoutTrimming()
+        {
+            using (Form overlay = CreateOverlay())
+            {
+                MethodInfo setRows = overlay.GetType().GetMethod("SetRows");
+                setRows.Invoke(overlay, new object[]
+                {
+                    new List<OverlayRow>
+                    {
+                        new OverlayRow(1, "ИП Иванов", "1 475,00 ₽", false),
+                        new OverlayRow(2, "ООО Очень Длинное Название Организации", "250,00 ₽", false)
+                    }
+                });
+                int wide = overlay.Width;
+                using (Graphics graphics = overlay.CreateGraphics())
+                {
+                    Control longName = overlay.Controls[2];
+                    TestAssert.True(
+                        graphics.MeasureString(longName.Text, longName.Font).Width <= longName.Width,
+                        "Автоширина не должна обрезать название организации.");
+                }
+                TestAssert.True(wide <= AppSettings.MaximumOverlayWidth,
+                    "Автоширина не выходит за максимум настроек.");
+
+                // A shorter set of names must give the overlay back the space it no longer needs.
+                setRows.Invoke(overlay, new object[]
+                {
+                    new List<OverlayRow> { new OverlayRow(1, "ИП Иванов", "1 475,00 ₽", false) }
+                });
+                TestAssert.True(overlay.Width < wide, "Автоширина должна сужаться под короткое название.");
+                TestAssert.True(overlay.Width >= AppSettings.MinimumOverlayWidth,
+                    "Автоширина не уходит ниже минимума настроек.");
+
+                // Once the width is typed by hand, automatic fitting must stop touching it.
+                overlay.GetType().GetMethod("SetAutoWidth").Invoke(overlay, new object[] { false });
+                overlay.GetType().GetMethod("SetAppearance").Invoke(overlay,
+                    new object[] { 640, overlay.Controls[0].Font.Size });
+                setRows.Invoke(overlay, new object[]
+                {
+                    new List<OverlayRow>
+                    {
+                        new OverlayRow(1, "ИП Иванов", "1 475,00 ₽", false),
+                        new OverlayRow(2, "ООО Очень Длинное Название Организации", "250,00 ₽", false)
+                    }
+                });
+                TestAssert.Equal(640, overlay.Width);
+            }
+        }
+
+        public static void ManualWidthSurvivesUntilOrganizationsChange()
+        {
+            var settings = AppSettings.CreateDefault();
+            TestAssert.True(settings.TryUpdateOverlayWidthSignature("1:ИП Иванов"),
+                "Первый состав организаций должен запомниться.");
+
+            settings.OverlayWidthIsManual = true;
+            TestAssert.True(!settings.TryUpdateOverlayWidthSignature("1:ИП Иванов"),
+                "Тот же состав не должен сбрасывать ручную ширину.");
+            TestAssert.True(settings.OverlayWidthIsManual,
+                "Ручная ширина сохраняется, пока состав организаций не изменился.");
+
+            TestAssert.True(settings.TryUpdateOverlayWidthSignature("1:ИП Иванов|2:ООО Колокольчик"),
+                "Новый состав организаций должен вернуть автоподбор.");
+            TestAssert.True(!settings.OverlayWidthIsManual,
+                "После изменения состава ширина снова подбирается автоматически.");
+
+            settings.OverlayWidthIsManual = true;
+            TestAssert.True(settings.TryUpdateOverlayWidthSignature("1:ИП Иванов|2:ООО Ромашка"),
+                "Переименование организации тоже меняет нужную ширину.");
+            TestAssert.True(!settings.OverlayWidthIsManual,
+                "После переименования ширина снова подбирается автоматически.");
         }
 
         public static void RefreshesOnlyOnAmountDoubleClick()

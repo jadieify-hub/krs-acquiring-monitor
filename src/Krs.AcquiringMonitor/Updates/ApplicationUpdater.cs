@@ -14,6 +14,9 @@ namespace Krs.AcquiringMonitor.Updates
     {
         private const string ManifestUrl =
             "https://github.com/jadieify-hub/krs-acquiring-monitor/releases/latest/download/update.json";
+        // The installer is about two megabytes; this only has to stop a broken or hostile
+        // response from filling a cash register disk before the hash is ever checked.
+        private const long MaximumInstallerBytes = 32L * 1024L * 1024L;
         private const string InstallerArguments =
             "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SP-";
         private readonly SafeLogger _logger;
@@ -134,10 +137,23 @@ namespace Krs.AcquiringMonitor.Updates
                                 81920,
                                 true))
                             {
-                                await source.CopyToAsync(
-                                    destination,
-                                    81920,
-                                    downloadCancellation.Token);
+                                var buffer = new byte[81920];
+                                long received = 0;
+                                int read;
+                                while ((read = await source.ReadAsync(
+                                        buffer, 0, buffer.Length,
+                                        downloadCancellation.Token)) > 0)
+                                {
+                                    received += read;
+                                    if (received > MaximumInstallerBytes)
+                                    {
+                                        Fail("installer-too-large");
+                                        return;
+                                    }
+
+                                    await destination.WriteAsync(
+                                        buffer, 0, read, downloadCancellation.Token);
+                                }
                             }
                         }
                     }

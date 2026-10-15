@@ -64,10 +64,16 @@ namespace Krs.AcquiringMonitor.Tests
                 "Некорректный SHA-256 должен отклоняться.");
             TestAssert.False(
                 UpdateManifest.TrySelect(
-                    "{\"version\":\"0.2.0\",\"sha256\":\"" + ValidHash + "\",\"url\":\"https://example.test/setup.exe\"}",
+                    "{\"version\":\"0.2.0\"}",
                     new Version(0, 1, 0),
                     out update),
-                "Лишние поля манифеста должны отклоняться.");
+                "Манифест без sha256 должен отклоняться.");
+            TestAssert.False(
+                UpdateManifest.TrySelect(
+                    "{\"sha256\":\"" + ValidHash + "\"}",
+                    new Version(0, 1, 0),
+                    out update),
+                "Манифест без версии должен отклоняться.");
             TestAssert.False(
                 UpdateManifest.TrySelect(
                     "{broken",
@@ -76,9 +82,21 @@ namespace Krs.AcquiringMonitor.Tests
                 "Повреждённый JSON должен отклоняться.");
         }
 
-        public static void RequiresExactTwoFieldObject()
+        public static void IgnoresUnknownManifestFields()
         {
             ValidatedUpdate update;
+            // A future manifest field must not blind the copies already installed,
+            // so unknown fields are ignored instead of rejected — and ignored means
+            // they cannot redirect the download either.
+            TestAssert.True(
+                UpdateManifest.TrySelect(
+                    "{\"version\":\"0.2.0\",\"sha256\":\"" + ValidHash + "\",\"url\":\"https://example.test/setup.exe\"}",
+                    new Version(0, 1, 0),
+                    out update),
+                "Лишнее поле манифеста не должно мешать обновлению.");
+            TestAssert.Equal(
+                "https://github.com/jadieify-hub/krs-acquiring-monitor/releases/download/v0.2.0/KRS-AcquiringMonitor-0.2.0-setup.exe",
+                update.DownloadUrl);
             TestAssert.True(
                 UpdateManifest.TrySelect(
                     "{\"sha256\":\"" + ValidHash + "\",\"version\":\"0.2.0\"}",
@@ -91,12 +109,13 @@ namespace Krs.AcquiringMonitor.Tests
                     new Version(0, 1, 0),
                     out update),
                 "Повторённые поля должны отклоняться.");
-            TestAssert.False(
+            TestAssert.True(
                 UpdateManifest.TrySelect(
                     "{\"__type\":\"UpdateManifest.ManifestContract:#Krs.AcquiringMonitor.Updates\",\"version\":\"0.2.0\",\"sha256\":\"" + ValidHash + "\"}",
                     new Version(0, 1, 0),
                     out update),
-                "Служебное поле __type должно отклоняться.");
+                "Служебное поле __type должно игнорироваться как любое неизвестное.");
+            TestAssert.Equal("0.2.0", update.Version.ToString(3));
             TestAssert.False(
                 UpdateManifest.TrySelect(
                     "[]",

@@ -35,7 +35,7 @@ Background failures are written only as safe technical diagnostics and do not di
 
 ## Shift-close correction
 
-The number of successful `close_day` results required before reset is based on expected configured or previously detected departments, not only on departments that happened to have transactions in the current shift. With two expected organizations, both successful closes are required even if one organization has a zero total. The first close marks data stale; only the second successful close resets both totals. A failed close never counts.
+The number of successful `close_day` results required before reset is based on expected configured or previously detected departments, not only on departments that happened to have transactions in the current shift. With two expected organizations, both successful closes are required even if one organization has a zero total. The first close marks data stale; only the second successful close resets both totals. A failed close never counts. **Superseded by amendment item 14: one successful close resets every organization.**
 
 ## Automatic update flow
 
@@ -49,7 +49,7 @@ The JSON manifest contains exactly the release version, installer filename and i
 
 The installer is downloaded under `%LOCALAPPDATA%\KRS\AcquiringMonitor\updates`. Its SHA-256 is compared before execution. A mismatch or malformed manifest aborts the update and removes the unusable file. Network, HTTP, parse, disk, hash and process-start failures leave the current version running and produce only a safe diagnostic entry.
 
-After verification, the application starts Inno Setup with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS` and exits. The fixed AppId and per-user install directory cause an in-place upgrade. Settings and runtime state remain in `%LOCALAPPDATA%\KRS\AcquiringMonitor` and are not removed or overwritten. The installer starts the new application after copying files, including in silent update mode.
+After verification, the application starts Inno Setup with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS` (**superseded by amendment item 15: `/NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS` with `/WAITPID=`**) and exits. The fixed AppId and per-user install directory cause an in-place upgrade. Settings and runtime state remain in `%LOCALAPPDATA%\KRS\AcquiringMonitor` and are not removed or overwritten. The installer starts the new application after copying files, including in silent update mode.
 
 SHA-256 plus fixed HTTPS origin protects against corruption and an arbitrary URL in the manifest. Until the executable is Authenticode-signed, release trust still depends on the GitHub publisher account; README must state this limitation.
 
@@ -93,7 +93,7 @@ Release verification consists of a fresh x86 Release test run, solution build, a
 - Names and amounts are plain white without outline; stale data is indicated only by the refresh control.
 - Refresh always provides immediate visible feedback and a blocked request is retried safely rather than silently ignored.
 - Missing organization names are eventually populated without cashier action and manual labels remain untouched.
-- With two expected organizations, the first of two shift closes cannot reset totals by itself.
+- ~~With two expected organizations, the first of two shift closes cannot reset totals by itself.~~ Superseded by amendment item 14.
 - Offline or private-repository startup works normally without credentials or blocking dialogs.
 - A valid newer public GitHub Release updates an installed copy silently and preserves settings.
 - Release artifacts and repository history contain no customer or bank runtime files.

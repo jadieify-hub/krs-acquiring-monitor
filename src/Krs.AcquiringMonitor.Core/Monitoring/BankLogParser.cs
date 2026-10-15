@@ -31,7 +31,6 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
         private readonly HashSet<int> _expectedDepartments;
         private PendingOperation _pendingOperation;
         private bool _pendingClose;
-        private bool _closeResultIsFinancial;
         private bool _isStale;
 
         public BankLogParser()
@@ -84,23 +83,35 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             Match start = StartPattern.Match(line);
             if (start.Success)
             {
+                // Another program writes this journal, so a corrupted or torn line must be
+                // skipped here: ProcessLine runs on a timer thread where a throw kills the app.
+                int transactionType;
+                long amountKopeks;
+                if (!TryParseInt(start.Groups["type"].Value, out transactionType) ||
+                    !TryParseLong(start.Groups["amount"].Value, out amountKopeks))
+                {
+                    return;
+                }
+
                 ActivityVersion++;
-                _pendingOperation = new PendingOperation(
-                    ParseInt(start.Groups["type"].Value),
-                    ParseLong(start.Groups["amount"].Value));
+                _pendingOperation = new PendingOperation(transactionType, amountKopeks);
                 _pendingClose = false;
                 return;
             }
 
-            // close_day also wraps statistics (7000); only 6000 starts settlement.
+            // close_day also wraps statistics (7000); only 6000 starts settlement. A 7000
+            // ends the wait without settling anything: the terminal has answered and is idle
+            // again, so leaving the wait set would block refresh, naming and updates until
+            // the next card transaction happened to clear it.
             Match closeCommand = CloseCommandPattern.Match(line);
             if (closeCommand.Success)
             {
-                _closeResultIsFinancial = closeCommand.Groups["command"].Value == "6000";
-                if (!_closeResultIsFinancial)
+                if (closeCommand.Groups["command"].Value != "6000")
                 {
+                    _pendingClose = false;
                     return;
                 }
+
                 ActivityVersion++;
                 _pendingOperation = null;
                 _pendingClose = true;
@@ -110,8 +121,14 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             Match command = CommandPattern.Match(line);
             if (command.Success && _pendingOperation != null)
             {
-                int department = ParseInt(command.Groups["department"].Value);
-                int commandCode = ParseInt(command.Groups["command"].Value);
+                int department;
+                int commandCode;
+                if (!TryParseInt(command.Groups["department"].Value, out department) ||
+                    !TryParseInt(command.Groups["command"].Value, out commandCode))
+                {
+                    return;
+                }
+
                 _pendingOperation.Department = department;
                 _pendingOperation.CommandMatchesType =
                     (_pendingOperation.TransactionType == 1 && commandCode == 4000) ||
@@ -123,18 +140,30 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             Match result = ResultPattern.Match(line);
             if (result.Success && _pendingOperation != null)
             {
-                CompleteOperation(
-                    ParseInt(result.Groups["result"].Value),
-                    result.Groups["rc"].Value);
+                int resultCode;
+                if (!TryParseInt(result.Groups["result"].Value, out resultCode))
+                {
+                    // An unreadable result must not leave the operation pending for the rest
+                    // of the shift, because that blocks refresh, naming and updates.
+                    _pendingOperation = null;
+                    return;
+                }
+
+                CompleteOperation(resultCode, result.Groups["rc"].Value);
                 return;
             }
 
             Match closeResult = CloseResultPattern.Match(line);
-            if (closeResult.Success && _pendingClose && _closeResultIsFinancial)
+            if (closeResult.Success && _pendingClose)
             {
-                CompleteClose(
-                    ParseInt(closeResult.Groups["result"].Value),
-                    closeResult.Groups["rc"].Value);
+                int closeCode;
+                if (!TryParseInt(closeResult.Groups["result"].Value, out closeCode))
+                {
+                    _pendingClose = false;
+                    return;
+                }
+
+                CompleteClose(closeCode, closeResult.Groups["rc"].Value);
             }
         }
 
@@ -198,8 +227,18 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
             }
 
             long direction = operation.TransactionType == 3 ? -1L : 1L;
-            _totals[operation.Department] =
-                checked(_totals[operation.Department] + direction * operation.AmountKopeks);
+            long current = _totals[operation.Department];
+            // Amount comes from the journal unvalidated, so an absurd value is dropped rather
+            // than allowed to overflow the running total.
+            long signed = direction * operation.AmountKopeks;
+            if (signed > 0
+                    ? current > long.MaxValue - signed
+                    : current < long.MinValue - signed)
+            {
+                return;
+            }
+
+            _totals[operation.Department] = current + signed;
         }
 
         private void CompleteClose(int result, string responseCode)
@@ -246,14 +285,22 @@ namespace Krs.AcquiringMonitor.Core.Monitoring
                    string.Equals(value, "00", StringComparison.Ordinal);
         }
 
-        private static int ParseInt(string value)
+        private static bool TryParseInt(string value, out int result)
         {
-            return int.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture);
+            return int.TryParse(
+                value,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out result);
         }
 
-        private static long ParseLong(string value)
+        private static bool TryParseLong(string value, out long result)
         {
-            return long.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture);
+            return long.TryParse(
+                value,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out result);
         }
 
         private sealed class PendingOperation

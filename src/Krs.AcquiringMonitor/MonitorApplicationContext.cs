@@ -69,6 +69,7 @@ namespace Krs.AcquiringMonitor
             _lifetimeCancellation = new CancellationTokenSource();
             _overlay = new OverlayForm();
             _overlay.SetAppearance(_settings.OverlayWidth, _settings.OverlayFontSize);
+            _overlay.SetAutoWidth(!_settings.OverlayWidthIsManual);
             _overlay.SetColors(_settings.OverlayTextColorArgb, _settings.OverlayAttentionColorArgb);
             _overlay.SetTypography(_settings.OverlayFontFamily, _settings.OverlayNamesBold,
                 _settings.OverlayAmountsBold ?? true);
@@ -268,10 +269,23 @@ namespace Krs.AcquiringMonitor
 
         private void UpdateOverlay(BankLogSnapshot snapshot)
         {
-            _overlay.SetRows(
-                OverlayPresentation.BuildRows(
-                    snapshot,
-                    _settings.GetOrganizationNames()));
+            IReadOnlyList<OverlayRow> rows = OverlayPresentation.BuildRows(
+                snapshot,
+                _settings.GetOrganizationNames());
+            ApplyOrganizationComposition(rows);
+            _overlay.SetRows(rows);
+        }
+
+        private void ApplyOrganizationComposition(IReadOnlyList<OverlayRow> rows)
+        {
+            if (_settingsForm != null) return;
+
+            string signature = string.Join("|",
+                rows.Select(row => row.Department + ":" + row.OrganizationName).ToArray());
+            if (!_settings.TryUpdateOverlayWidthSignature(signature)) return;
+
+            _overlay.SetAutoWidth(true);
+            SaveSettings();
         }
 
         private void TrackFrontol(object sender, EventArgs eventArgs)
@@ -355,10 +369,25 @@ namespace Krs.AcquiringMonitor
 
         private bool IsBusyForUpdate(BankLogMonitor monitor)
         {
+            // Any window besides the overlay means the cashier is in the middle of something.
+            // Counting open forms instead silently depended on the overlay being shown, so a
+            // hidden overlay let the restart happen under an open dialog.
+            foreach (Form form in Application.OpenForms)
+            {
+                if (!ReferenceEquals(form, _overlay))
+                {
+                    return true;
+                }
+            }
+
+            // Stale totals block installation on purpose: stale means the journal could not be
+            // read, and an unreadable journal cannot tell us whether an operation is in flight
+            // — HasPendingOperation and the quiet-journal window are both blind then. A copy
+            // stuck stale is upgraded by running the installer by hand, as the README says.
             return _resettingData || _settingsForm != null || _diagnosticsForm != null ||
                 _refreshing || _manualRefreshPending ||
-                Application.OpenForms.Count > 1 || _overlay.IsUserDragging ||
-                monitor.HasPendingOperation || monitor.CurrentSnapshot.IsStale;
+                _overlay.IsUserDragging || monitor.HasPendingOperation ||
+                monitor.CurrentSnapshot.IsStale;
         }
 
         private async Task CheckUpdatesAsync(bool manual)
@@ -745,6 +774,7 @@ namespace Krs.AcquiringMonitor
 
             _overlay.CancelDrag();
             _overlay.SetAppearance(_settings.OverlayWidth, _settings.OverlayFontSize);
+            _overlay.SetAutoWidth(!_settings.OverlayWidthIsManual);
             if (form.DialogResult == DialogResult.OK)
             {
                 SaveOverlayPosition(this, EventArgs.Empty);
@@ -833,7 +863,6 @@ namespace Krs.AcquiringMonitor
             _settings.OverlayOffsetX = offset.X;
             _settings.OverlayOffsetY = offset.Y;
             _settings.HasCustomPosition = true;
-            _settings.OverlayWidth = _overlay.PreferredWidth;
             SaveSettings();
         }
 

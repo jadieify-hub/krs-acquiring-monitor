@@ -137,6 +137,8 @@ namespace Krs.AcquiringMonitor.Tests
             object form = Activator.CreateInstance(formType);
             try
             {
+                // This test is about the configured width, so switch automatic fitting off.
+                formType.GetMethod("SetAutoWidth").Invoke(form, new object[] { false });
                 object controls = formType.GetProperty("Controls").GetValue(form, null);
                 object nameControl = controls.GetType()
                     .GetProperty("Item", new[] { typeof(int) })
@@ -173,7 +175,7 @@ namespace Krs.AcquiringMonitor.Tests
             }
         }
 
-        public static void AmountDoesNotOverlapResizeGrip()
+        public static void AmountDoesNotOverlapRightEdge()
         {
             Type formType = typeof(OverlayPresentation).Assembly.GetType(
                 "Krs.AcquiringMonitor.UI.OverlayForm", true);
@@ -187,7 +189,6 @@ namespace Krs.AcquiringMonitor.Tests
                         new Dictionary<int, string> { { 1, "ИП Иванов" } })
                 });
                 var amount = form.Controls[1];
-                var grip = form.Controls[form.Controls.Count - 1];
                 foreach (float dpi in new[] { 96f, 144f, 192f })
                 using (var bitmap = new Bitmap(1200, 240))
                 {
@@ -204,8 +205,6 @@ namespace Krs.AcquiringMonitor.Tests
                             "Полная сумма с копейками и ₽ должна помещаться при DPI=" + dpi);
                         TestAssert.True(amount.Font.GetHeight(graphics) <= amount.Height,
                             "Сумма должна помещаться по высоте при DPI=" + dpi);
-                        TestAssert.True(amount.Right < grip.Left,
-                            "Сумма не должна залезать на край изменения ширины.");
                     }
                 }
             }

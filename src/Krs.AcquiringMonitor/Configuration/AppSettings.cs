@@ -66,6 +66,30 @@ namespace Krs.AcquiringMonitor.Configuration
         [DataMember(Order = 13)]
         public bool? OverlayAmountsBold { get; set; }
 
+        [DataMember(Order = 14)]
+        public bool OverlayWidthIsManual { get; set; }
+
+        [DataMember(Order = 15)]
+        public string OverlayWidthSignature { get; set; }
+
+        // A new set of organizations or a new name needs a new width, so it re-enables
+        // automatic fitting; a width typed by the user survives until then.
+        public bool TryUpdateOverlayWidthSignature(string signature)
+        {
+            signature = signature ?? string.Empty;
+            if (string.Equals(
+                    signature,
+                    OverlayWidthSignature ?? string.Empty,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            OverlayWidthSignature = signature;
+            OverlayWidthIsManual = false;
+            return true;
+        }
+
         public static string NormalizeOverlayFontFamily(string family)
         {
             return OverlayFontFamilies.FirstOrDefault(value =>

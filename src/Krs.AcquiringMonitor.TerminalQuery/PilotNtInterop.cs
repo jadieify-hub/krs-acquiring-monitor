@@ -142,17 +142,15 @@ namespace Krs.AcquiringMonitor.TerminalQuery
 
                 return PilotQueryResult.Ok(report);
             }
+            // An access violation inside the bank DLL is a corrupted-state exception and is
+            // never delivered here, so there is no catch for it: this helper is a separate
+            // process precisely so such a crash only costs a non-zero exit code, which the
+            // caller already reports as a failed query.
             catch (SEHException)
             {
                 return PilotQueryResult.Fail(
                     9,
                     "Компонент Сбербанка аварийно завершил запрос.");
-            }
-            catch (AccessViolationException)
-            {
-                return PilotQueryResult.Fail(
-                    9,
-                    "Компонент Сбербанка вернул некорректные данные.");
             }
             finally
             {

@@ -1,6 +1,8 @@
 #define MyAppName "KRS Эквайринг Монитор"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.12"
+  ; The version is typed once, as build-release.ps1 -Version, and arrives as
+  ; /DMyAppVersion. A copy here would silently stamp a stale version on a release.
+  #error MyAppVersion is not set: compile through build/build-release.ps1.
 #endif
 #define MyAppPublisher "KRS"
 #define MyAppExeName "Krs.AcquiringMonitor.exe"

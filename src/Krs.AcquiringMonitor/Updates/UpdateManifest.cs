@@ -65,11 +65,10 @@ namespace Krs.AcquiringMonitor.Updates
             ManifestContract manifest;
             try
             {
-                if (!HasExactContractFields(json))
-                {
-                    return false;
-                }
-
+                // Unknown fields are ignored on purpose: rejecting them would mean a later
+                // manifest field could never be added without blinding every installed copy.
+                // Safety does not depend on the field set — the file name and URL are built
+                // from the validated version and the installer is checked against sha256.
                 var serializer = new DataContractJsonSerializer(
                     typeof(ManifestContract));
                 using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
@@ -155,51 +154,6 @@ namespace Krs.AcquiringMonitor.Updates
             {
                 return false;
             }
-        }
-
-        private static bool HasExactContractFields(string json)
-        {
-            bool hasVersion = false;
-            bool hasSha256 = false;
-            using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
-            using (XmlDictionaryReader reader =
-                JsonReaderWriterFactory.CreateJsonReader(
-                    stream,
-                    XmlDictionaryReaderQuotas.Max))
-            {
-                if (!reader.Read() ||
-                    reader.NodeType != XmlNodeType.Element ||
-                    reader.LocalName != "root" ||
-                    reader.AttributeCount != 1 ||
-                    reader.GetAttribute("type") != "object")
-                {
-                    return false;
-                }
-
-                while (reader.Read())
-                {
-                    if (reader.NodeType != XmlNodeType.Element ||
-                        reader.Depth != 1)
-                    {
-                        continue;
-                    }
-
-                    if (reader.LocalName == "version" && !hasVersion)
-                    {
-                        hasVersion = true;
-                    }
-                    else if (reader.LocalName == "sha256" && !hasSha256)
-                    {
-                        hasSha256 = true;
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return hasVersion && hasSha256;
         }
 
         private static bool IsValidSha256(string value)

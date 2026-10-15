@@ -66,7 +66,6 @@ namespace Krs.AcquiringMonitor.UI
         private bool _previewAttentionColor;
         private readonly Label[] _nameControls;
         private readonly Label[] _amountControls;
-        private readonly Label _resizeGrip;
         private readonly ToolTip _toolTip = new ToolTip { ShowAlways = true, AutoPopDelay = 15000 };
         private int _rowCount = 1;
         private string _refreshStatus = string.Empty;
@@ -84,8 +83,8 @@ namespace Krs.AcquiringMonitor.UI
         private bool _namesBold;
         private bool _amountsBold = true;
         private float _layoutScale = 1f;
-        private bool _resizing;
-        private int _resizeWidthOrigin;
+        private bool _autoWidth = true;
+        private int _autoWidthResult = AppSettings.DefaultOverlayWidth;
         private bool _renderQueued;
 
         public OverlayForm()
@@ -135,22 +134,6 @@ namespace Krs.AcquiringMonitor.UI
                 _amountControls[index] = amount;
             }
 
-            _resizeGrip = new OverlayTextLabel
-            {
-                Text = "⋮",
-                Font = new Font("Segoe UI Symbol", 12f, FontStyle.Regular),
-                ForeColor = _textColor,
-                BackColor = Color.Transparent,
-                Cursor = Cursors.SizeWE,
-                TextAlign = ContentAlignment.MiddleCenter,
-                AccessibleName = "Изменить ширину оверлея",
-                AccessibleRole = AccessibleRole.Grip
-            };
-            _resizeGrip.MouseDown += BeginResize;
-            _resizeGrip.MouseMove += ContinueResize;
-            _resizeGrip.MouseUp += EndResize;
-            Controls.Add(_resizeGrip);
-            _toolTip.SetToolTip(_resizeGrip, "Потяните край, чтобы изменить ширину. Шрифт не меняется.");
             foreach (Control part in Controls)
             {
                 part.TextChanged += QueueRender;
@@ -170,20 +153,27 @@ namespace Krs.AcquiringMonitor.UI
 
         public bool IsUserDragging
         {
-            get { return _dragging || _resizing; }
+            get { return _dragging; }
         }
 
+        // The width the settings field should show: the fitted one while fitting is on,
+        // otherwise the width the user configured.
         public int PreferredWidth
         {
-            get { return _preferredWidth; }
+            get { return _autoWidth ? _autoWidthResult : _preferredWidth; }
+        }
+
+        public void SetAutoWidth(bool autoWidth)
+        {
+            if (_autoWidth == autoWidth) return;
+            _autoWidth = autoWidth;
+            LayoutRows();
         }
 
         public void CancelDrag()
         {
             _dragging = false;
-            _resizing = false;
             foreach (Label name in _nameControls) name.Capture = false;
-            _resizeGrip.Capture = false;
         }
 
         public void SetAppearance(int width, float fontSize)
@@ -234,7 +224,6 @@ namespace Krs.AcquiringMonitor.UI
             _attentionColor = AppSettings.NormalizeOverlayColor(attentionArgb, AppSettings.DefaultOverlayAttentionColor);
             _previewAttentionColor = previewAttention;
             foreach (Label name in _nameControls) name.ForeColor = _textColor;
-            _resizeGrip.ForeColor = _textColor;
             UpdateRefreshState();
         }
 
@@ -315,7 +304,28 @@ namespace Krs.AcquiringMonitor.UI
                         _amountControls[index].Font).Width) + pixels(8));
             }
 
-            int nameWidth = Math.Max(pixels(64), pixels(_preferredWidth) - amountWidth - pixels(24));
+            int nameWidth;
+            if (_autoWidth)
+            {
+                int needed = 0;
+                for (int index = 0; index < _rowCount; index++)
+                {
+                    needed = Math.Max(needed, (int)Math.Ceiling(
+                        graphics.MeasureString(_nameControls[index].Text,
+                            _nameControls[index].Font).Width));
+                }
+                // Keep the automatic result inside the range the settings field allows.
+                nameWidth = Math.Min(needed,
+                    pixels(AppSettings.MaximumOverlayWidth) - amountWidth - pixels(24));
+                nameWidth = Math.Max(
+                    pixels(AppSettings.MinimumOverlayWidth) - amountWidth - pixels(24),
+                    nameWidth);
+                nameWidth = Math.Max(pixels(64), nameWidth);
+            }
+            else
+            {
+                nameWidth = Math.Max(pixels(64), pixels(_preferredWidth) - amountWidth - pixels(24));
+            }
             int rowHeight = Math.Max(pixels(32),
                 (int)Math.Ceiling(_amountControls[0].Font.GetHeight(graphics)) + pixels(2));
             int rowStep = rowHeight + pixels(4);
@@ -328,9 +338,15 @@ namespace Krs.AcquiringMonitor.UI
                     pixels(4) + index * rowStep, amountWidth, rowHeight);
             }
             Height = pixels(10) + _rowCount * rowStep;
-            _resizeGrip.Bounds = new Rectangle(
-                _amountControls[0].Right + pixels(2), 0, pixels(12), Height);
-            Width = _resizeGrip.Right + pixels(2);
+            // The trailing pixels(16) replaces the removed resize grip and its margins,
+            // so a saved width still produces the same overlay width as before.
+            Width = _amountControls[0].Right + pixels(16);
+            if (_autoWidth)
+            {
+                // Keep _preferredWidth untouched: it is the configured width to return to.
+                _autoWidthResult = AppSettings.NormalizeOverlayWidth(
+                    (int)Math.Ceiling(Width / scale));
+            }
         }
 
         internal Bitmap RenderBitmap()
@@ -345,7 +361,6 @@ namespace Krs.AcquiringMonitor.UI
                     DrawPart(graphics, _nameControls[index]);
                     DrawPart(graphics, _amountControls[index]);
                 }
-                DrawPart(graphics, _resizeGrip);
             }
             return bitmap;
         }
@@ -455,7 +470,6 @@ namespace Krs.AcquiringMonitor.UI
                 _toolTip.Dispose();
                 _nameControls[0].Font.Dispose();
                 _amountControls[0].Font.Dispose();
-                _resizeGrip.Font.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -577,32 +591,6 @@ namespace Krs.AcquiringMonitor.UI
 
             ((Control)sender).Capture = false;
             _dragging = false;
-            CommitPosition();
-        }
-
-        private void BeginResize(object sender, MouseEventArgs eventArgs)
-        {
-            if (eventArgs.Button != MouseButtons.Left) return;
-            _resizing = true;
-            _resizeWidthOrigin = Width;
-            _dragCursorOrigin = _resizeGrip.PointToScreen(eventArgs.Location);
-            _resizeGrip.Capture = true;
-        }
-
-        private void ContinueResize(object sender, MouseEventArgs eventArgs)
-        {
-            if (!_resizing || eventArgs.Button != MouseButtons.Left) return;
-            int width = (int)Math.Round(
-                (_resizeWidthOrigin + _resizeGrip.PointToScreen(eventArgs.Location).X -
-                    _dragCursorOrigin.X) / _layoutScale);
-            SetAppearance(Math.Max(AppSettings.MinimumOverlayWidth, width), _fontSize);
-        }
-
-        private void EndResize(object sender, MouseEventArgs eventArgs)
-        {
-            if (!_resizing) return;
-            _resizeGrip.Capture = false;
-            _resizing = false;
             CommitPosition();
         }
 
