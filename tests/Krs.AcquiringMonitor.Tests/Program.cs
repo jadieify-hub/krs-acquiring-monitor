@@ -87,6 +87,8 @@ namespace Krs.AcquiringMonitor.Tests
             Run("путь helper-а не искажается", TerminalStatisticsClientTests.QuotesWindowsPathWithoutChangingSeparators);
             Run("остатки временных отчётов удаляются", TerminalStatisticsClientTests.RemovesStaleTemporaryReports);
             Run("автоимена запрашиваются не чаще десяти минут", AutomaticNameRefreshPolicyTests.WaitsUntilDueAndRetriesAfterTenMinutes);
+            Run("принятый отчёт прекращает автозапросы имён", AutomaticNameRefreshPolicyTests.AcceptedReportStopsAskingTheTerminal);
+            Run("три неудачи прекращают автозапросы имён", AutomaticNameRefreshPolicyTests.ThreeFailuresStopAutomaticNaming);
             Run("новая версия выбирается с ожидаемым установщиком", UpdateManifestTests.SelectsNewerVersionAndDerivesInstaller);
             Run("невалидные манифесты обновления отклоняются", UpdateManifestTests.RejectsInvalidAndNonNewerManifests);
             Run("неизвестные поля манифеста игнорируются", UpdateManifestTests.IgnoresUnknownManifestFields);

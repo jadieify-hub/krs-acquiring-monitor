@@ -526,6 +526,7 @@ namespace Krs.AcquiringMonitor
                 interactive ? "manual" : "automatic",
                 null);
 
+            bool accepted = false;
             try
             {
                 TerminalStatisticsResult result = await _terminalClient.QueryAsync(
@@ -627,6 +628,7 @@ namespace Krs.AcquiringMonitor
                 SetRefreshResult("Итоги обновлены",
                     "Суммы получены непосредственно из текущего отчёта терминала.",
                     false);
+                accepted = true;
             }
             catch (Exception exception)
             {
@@ -637,6 +639,17 @@ namespace Krs.AcquiringMonitor
                 SetRefreshResult("Не удалось получить итоги",
                     "Произошла техническая ошибка. Предыдущие суммы сохранены.",
                     true);
+            }
+            finally
+            {
+                if (accepted)
+                {
+                    _automaticNameRefreshPolicy.RecordAccepted();
+                }
+                else if (!interactive)
+                {
+                    _automaticNameRefreshPolicy.RecordFailure();
+                }
             }
         }
 
