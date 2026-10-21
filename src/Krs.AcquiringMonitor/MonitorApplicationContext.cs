@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using Krs.AcquiringMonitor.Configuration;
 using Krs.AcquiringMonitor.Core.Monitoring;
 using Krs.AcquiringMonitor.Core.Reports;
@@ -48,6 +49,11 @@ namespace Krs.AcquiringMonitor
         private bool _maintenanceRunning;
         private bool _resettingData;
         private bool _exiting;
+        // Every exit used to be logged as "requested", so a shutdown, another installer
+        // destroying our window and a cashier choosing Exit were indistinguishable in the
+        // diagnostics — which is why a monitor that was simply gone stayed unexplained.
+        private const string UnknownExitReason = "unknown";
+        private string _exitReason = UnknownExitReason;
 
         public MonitorApplicationContext()
         {
@@ -78,8 +84,9 @@ namespace Krs.AcquiringMonitor
             // Restart Manager can destroy the hidden taskbar owner without sending FormClosed.
             _overlay.HandleDestroyed += delegate
             {
-                if (!_overlay.RecreatingHandle) ExitThread();
+                if (!_overlay.RecreatingHandle) ExitWith("handle-destroyed");
             };
+            SystemEvents.SessionEnding += SessionEnding;
             IntPtr unusedHandle = _overlay.Handle;
 
             _trayIcon = new NotifyIcon
@@ -131,12 +138,13 @@ namespace Krs.AcquiringMonitor
             }
 
             _exiting = true;
+            SystemEvents.SessionEnding -= SessionEnding;
             if (_settingsForm != null)
             {
                 _settingsForm.Close();
             }
             if (_diagnosticsForm != null) _diagnosticsForm.Close();
-            _logger.Write(SafeLogEvent.ApplicationExiting, "requested", null);
+            _logger.Write(SafeLogEvent.ApplicationExiting, _exitReason, null);
             _lifetimeCancellation.Cancel();
             _terminalClient.CancelActiveQuery();
             _frontolTimer.Stop();
@@ -353,7 +361,7 @@ namespace Krs.AcquiringMonitor
                             DateTimeOffset.UtcNow, monitor.CaptureRevision(),
                             IsBusyForUpdate(monitor)) && _updater.TryStartInstaller())
                     {
-                        ExitThread();
+                        ExitWith("update");
                         return;
                     }
                 }
@@ -972,7 +980,32 @@ namespace Krs.AcquiringMonitor
 
         private void ExitApplication(object sender, EventArgs eventArgs)
         {
+            ExitWith("tray");
+        }
+
+        // Windows destroys our window on logoff and shutdown, so the reason has to be recorded
+        // before the destruction arrives and is mistaken for anything else.
+        private void SessionEnding(object sender, SessionEndingEventArgs eventArgs)
+        {
+            SetExitReason("session-end");
+        }
+
+        private void ExitWith(string reason)
+        {
+            SetExitReason(reason);
             ExitThread();
+        }
+
+        // The first reason wins. Shutting down destroys our window, so the destruction
+        // arrives after the cause is already known and must not relabel it; the same holds
+        // for the tray and the update, whose own teardown destroys the window too.
+        private void SetExitReason(string reason)
+        {
+            if (!_exiting &&
+                string.Equals(_exitReason, UnknownExitReason, StringComparison.Ordinal))
+            {
+                _exitReason = reason;
+            }
         }
 
         private void ShowBalloon(

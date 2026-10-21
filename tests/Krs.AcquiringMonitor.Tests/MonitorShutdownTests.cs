@@ -45,6 +45,37 @@ namespace Krs.AcquiringMonitor.Tests
             }
         }
 
+        public static void ExitReasonSaysWhyTheMonitorIsGone()
+        {
+            Type type = typeof(Krs.AcquiringMonitor.UI.OverlayPresentation).Assembly
+                .GetType("Krs.AcquiringMonitor.MonitorApplicationContext", true);
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            MethodInfo setReason = type.GetMethod("SetExitReason", flags);
+            MethodInfo sessionEnding = type.GetMethod("SessionEnding", flags);
+            FieldInfo reason = type.GetField("_exitReason", flags);
+            FieldInfo exiting = type.GetField("_exiting", flags);
+            TestAssert.True(setReason != null && sessionEnding != null && reason != null,
+                "Причина выхода должна записываться отдельно от самого выхода.");
+
+            object context = System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(type);
+            // GetUninitializedObject не выполняет инициализаторы полей, поэтому задаём
+            // начальное значение так, как его получает настоящий объект.
+            reason.SetValue(context, "unknown");
+
+            sessionEnding.Invoke(context, new object[] { null, null });
+            TestAssert.Equal("session-end", (string)reason.GetValue(context));
+
+            // Выключение Windows уничтожает окно, и этот обработчик приходит следом;
+            // раньше все причины писались как requested и были неотличимы.
+            setReason.Invoke(context, new object[] { "handle-destroyed" });
+            TestAssert.Equal("session-end", (string)reason.GetValue(context));
+
+            exiting.SetValue(context, true);
+            setReason.Invoke(context, new object[] { "tray" });
+            TestAssert.Equal("session-end", (string)reason.GetValue(context));
+        }
+
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")]

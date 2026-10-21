@@ -75,6 +75,7 @@ namespace Krs.AcquiringMonitor.Tests
             Run("ручная база продолжается с сохранённой позиции", MonthRolloverTests.ManualSnapshotResumesFromSavedOffset);
             Run("выход не ждёт читателя и сохраняет безопасную базу", MonitorShutdownTests.ShutdownKeepsSafeCheckpointWithoutWaitingForReader);
             Run("скрытый оверлей принимает системное закрытие", MonitorShutdownTests.HiddenOverlayHandlesSessionShutdown);
+            Run("причина выхода различает трей, обновление и систему", MonitorShutdownTests.ExitReasonSaysWhyTheMonitorIsGone);
             Run("перезапуск со старой базой учитывает одну общую сверку", MonthRolloverTests.RestartFromPreSettlementCheckpointUsesNewShiftTotals);
             Run("состояние привязано к каталогу UPOS", MonthRolloverTests.RuntimeStateIsBoundToUposDirectory);
             Run("исчезновение активного журнала не повторяет старый месяц", MonthRolloverTests.MissingActiveLogKeepsLastSnapshotStale);
