@@ -8,6 +8,10 @@ namespace Krs.AcquiringMonitor.Core.Reports
 {
     public static class StatisticsReportParser
     {
+        private static readonly Regex DepartmentHeaderPattern = new Regex(
+            @"^\s*Отдел\s*:\s*(?<name>.*)$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
         private static readonly Regex MoneyPattern = new Regex(
             @"(?<!\d)(?<value>-?(?:\d{1,3}(?:[ \u00A0]\d{3})+|\d+)[,.]\d{2})(?!\d)",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -34,16 +38,31 @@ namespace Krs.AcquiringMonitor.Core.Reports
                 .Replace('\r', '\n')
                 .Split('\n');
 
+            // UPOS department labels may omit ООО; the receipt preamble is not a department.
+            bool hasDepartmentHeaders = lines.Any(line => DepartmentHeaderPattern.IsMatch(line));
             foreach (string line in lines)
             {
-                string legalName;
-                if (OrganizationNameShortener.TryExtractLegalName(line, out legalName))
+                string legalName = null;
+                if (hasDepartmentHeaders)
                 {
-                    if (IsSberbankHeader(legalName))
+                    Match header = DepartmentHeaderPattern.Match(line);
+                    if (header.Success)
                     {
-                        continue;
+                        legalName = OrganizationNameShortener.Normalize(header.Groups["name"].Value);
+                        if (legalName.Length == 0)
+                        {
+                            return new OrganizationReport[0];
+                        }
                     }
+                }
+                else if (OrganizationNameShortener.TryExtractLegalName(line, out legalName) &&
+                    IsSberbankHeader(legalName))
+                {
+                    continue;
+                }
 
+                if (legalName != null)
+                {
                     if (!TryAddCompletedSection(current, reports))
                     {
                         return new OrganizationReport[0];

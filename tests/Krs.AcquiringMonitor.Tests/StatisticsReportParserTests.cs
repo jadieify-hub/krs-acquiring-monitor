@@ -8,6 +8,64 @@ namespace Krs.AcquiringMonitor.Tests
 {
     internal static class StatisticsReportParserTests
     {
+        private const string DepartmentReportWithoutLegalForm =
+            "ПАО СБЕРБАНК\n" +
+            "Отдел : ТЕСТ-ТРЕЙД\n" +
+            "Количество оплат: 1\nНа сумму: 500.00\n" +
+            "Количество отмен: 0\nНа сумму: 0.00\n" +
+            "Количество возвратов: 0\nНа сумму: 0.00\n" +
+            "Отдел : ИП ПРИМЕРОВ А А\n" +
+            "Количество оплат: 0\nНа сумму: 0.00\n" +
+            "Количество отмен: 0\nНа сумму: 0.00\n" +
+            "Количество возвратов: 0\nНа сумму: 0.00\n";
+
+        public static void DepartmentWithoutLegalFormKeepsItsNameAndTotal()
+        {
+            foreach (int codePage in new[] { 1251, 866 })
+            {
+                byte[] bytes = Encoding.GetEncoding(codePage).GetBytes(DepartmentReportWithoutLegalForm);
+                IReadOnlyList<OrganizationReport> parsed =
+                    StatisticsReportParser.Parse(TerminalReceiptDecoder.Decode(bytes));
+
+                TestAssert.Equal(2, parsed.Count);
+                TestAssert.Equal("ТЕСТ-ТРЕЙД", parsed[0].ShortName);
+                TestAssert.Equal(50000L, parsed[0].TotalKopeks);
+                TestAssert.Equal("ИП ПРИМЕРОВ", parsed[1].ShortName);
+                TestAssert.Equal(0L, parsed[1].TotalKopeks);
+
+                IReadOnlyDictionary<int, DepartmentTotal> merged;
+                bool applied = StatisticsSnapshotMerger.TryMerge(
+                    ExpectedDepartmentResolver.Resolve(new[] { 1 }, parsed.Count),
+                    new Dictionary<int, string>(), parsed, out merged);
+                TestAssert.True(applied, "Полный отчёт сохраняет первую организацию и пустую вторую.");
+                TestAssert.Equal("ТЕСТ-ТРЕЙД", merged[1].OrganizationName);
+                TestAssert.Equal(50000L, merged[1].AmountKopeks);
+                TestAssert.Equal("ИП ПРИМЕРОВ", merged[2].OrganizationName);
+                TestAssert.Equal(0L, merged[2].AmountKopeks);
+            }
+        }
+
+        public static void DepartmentHeadersOverrideReceiptPreambleName()
+        {
+            IReadOnlyList<OrganizationReport> parsed = StatisticsReportParser.Parse(
+                "ООО ЗАГОЛОВОК ЧЕКА\nАдрес магазина\n" + DepartmentReportWithoutLegalForm);
+            TestAssert.Equal(2, parsed.Count);
+            TestAssert.Equal("ТЕСТ-ТРЕЙД", parsed[0].ShortName);
+            TestAssert.Equal(50000L, parsed[0].TotalKopeks);
+        }
+
+        public static void InvalidDepartmentDoesNotBecomeAnIpOnlyReport()
+        {
+            foreach (string report in new[]
+            {
+                DepartmentReportWithoutLegalForm.Replace("На сумму: 500.00", "На сумму: недоступно"),
+                DepartmentReportWithoutLegalForm.Replace("Отдел : ТЕСТ-ТРЕЙД", "Отдел : ")
+            })
+            {
+                TestAssert.Equal(0, StatisticsReportParser.Parse(report).Count);
+            }
+        }
+
         // Обезличенная структура контрольной ленты UPOS; реальные реквизиты не сохраняются.
         private const string ControlTapeReport =
             "ПАО СБЕРБАНК   Контрольная лента\n" +

@@ -45,6 +45,9 @@ namespace Krs.AcquiringMonitor.Tests
             Run("разбирается итог одной организации", StatisticsReportParserTests.ParsesSingleOrganizationTotal);
             Run("разбираются две организации", StatisticsReportParserTests.ParsesTwoOrganizations);
             Run("контрольная лента UPOS декодируется и разбирается", StatisticsReportParserTests.ParsesControlTapeReceipt);
+            Run("отдел без ООО сохраняет своё имя и сумму", StatisticsReportParserTests.DepartmentWithoutLegalFormKeepsItsNameAndTotal);
+            Run("отделы не подменяются организацией из шапки чека", StatisticsReportParserTests.DepartmentHeadersOverrideReceiptPreambleName);
+            Run("повреждённый отдел не превращает отчёт в один ИП", StatisticsReportParserTests.InvalidDepartmentDoesNotBecomeAnIpOnlyReport);
             Run("неполные и повторные итоги ленты отклоняются", StatisticsReportParserTests.RejectsIncompleteOrDuplicateControlTapeSummary);
             Run("непроверенные отмены ленты не меняют суммы", StatisticsReportParserTests.RejectsControlTapeWithUnverifiedCancellations);
             Run("итог вычисляется из оплаты и возврата", StatisticsReportParserTests.CalculatesTotalWhenExplicitTotalIsMissing);
