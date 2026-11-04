@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using Krs.AcquiringMonitor.Configuration;
@@ -52,8 +53,18 @@ namespace Krs.AcquiringMonitor.Tests
                 using (var menu = (System.Windows.Forms.ContextMenuStrip)type
                     .GetMethod("CreateTrayMenu", flags).Invoke(context, null))
                 {
-                    TestAssert.Equal("Обновить суммы", menu.Items[1].Text);
-                    TestAssert.Equal("Проверить обновление программы…", menu.Items[2].Text);
+                    string version = type.Assembly.GetName().Version.ToString(3);
+                    TestAssert.True(menu.Items[0].Text.EndsWith(" " + version),
+                        "Верхняя строка трея должна показывать версию запущенной сборки.");
+                    TestAssert.True(menu.Items.Cast<System.Windows.Forms.ToolStripItem>()
+                        .Any(item => item.Text == "Обновить суммы"), "Нужен отдельный пункт обновления сумм.");
+                    TestAssert.True(menu.Items.Cast<System.Windows.Forms.ToolStripItem>()
+                        .Any(item => item.Text == "Проверить обновление программы…"), "Нужен отдельный пункт обновления ПО.");
+                    using (var editor = OverlayAppearanceTests.CreateSettingsEditor(settings, overlay))
+                    {
+                        TestAssert.True(editor.Text.Contains(version),
+                            "Заголовок настроек должен показывать версию запущенной сборки.");
+                    }
                 }
             }
         }

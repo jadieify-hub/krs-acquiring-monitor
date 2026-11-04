@@ -91,7 +91,7 @@ namespace Krs.AcquiringMonitor
 
             _trayIcon = new NotifyIcon
             {
-                Text = AppConstants.ApplicationName,
+                Text = AppConstants.ApplicationName + " " + AppConstants.Version,
                 Icon = AppConstants.Icon,
                 ContextMenuStrip = CreateTrayMenu(),
                 Visible = true
@@ -177,6 +177,9 @@ namespace Krs.AcquiringMonitor
         private ContextMenuStrip CreateTrayMenu()
         {
             var menu = new ContextMenuStrip();
+            menu.Items.Add(new ToolStripMenuItem(AppConstants.ApplicationName + " " + AppConstants.Version)
+                { Enabled = false });
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Настройки", null, ShowSettings);
             menu.Items.Add("Обновить суммы", null, RefreshFromTerminal);
             menu.Items.Add("Проверить обновление программы…", null, CheckUpdatesFromMenu);
